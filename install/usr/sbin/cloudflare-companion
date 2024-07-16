@@ -181,7 +181,7 @@ def point_domain(name, domain_infos):
                     records = cf.zones.dns_records.get(domain_info['zone_id'], params={u'name': name})
                     break
                 except CloudFlare.exceptions.CloudFlareAPIError as e:
-                    if e.code == 1015:  # Rate limit error
+                    if "Rate limited" in str(e):  # Check for rate limit error message
                         retry += 1
                         time.sleep(2 ** retry)  # Exponential backoff
                     else:
