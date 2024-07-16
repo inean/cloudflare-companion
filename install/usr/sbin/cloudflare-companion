@@ -174,7 +174,23 @@ def point_domain(name, domain_infos):
             if is_domain_excluded(name, domain_info):
                 continue
 
-            records = cf.zones.dns_records.get(domain_info['zone_id'], params={u'name': name})
+            records = None
+            retry = 0
+            while retry < 5:  # maximum of 5 retries
+                try:
+                    records = cf.zones.dns_records.get(domain_info['zone_id'], params={u'name': name})
+                    break
+                except CloudFlare.exceptions.CloudFlareAPIError as e:
+                    if e.code == 1015:  # Rate limit error
+                        retry += 1
+                        time.sleep(2 ** retry)  # Exponential backoff
+                    else:
+                        raise e
+
+            if records is None:
+                ok = False
+                continue
+
             data = {
                 u'type': RC_TYPE,
                 u'name': name,
@@ -217,7 +233,7 @@ def point_domain(name, domain_infos):
 def check_container_t1(c):
     def label_host():
         for prop in c.attrs.get(u'Config').get(u'Labels'):
-            if re.match('traefik.*.frontend.rule', prop):
+            if re.match(r'traefik.*.frontend.rule', prop):
                 value = c.attrs.get(u'Config').get(u'Labels').get(prop)
                 if 'Host' in value:
                     value = value.split("Host:")[1].strip()
@@ -252,7 +268,7 @@ def check_container_t1(c):
 def check_service_t1(s):
     def label_host():
         for prop in s.attrs.get(u'Spec').get(u'TaskTemplate').get(u'ContainerSpec').get(u'Labels'):
-            if re.match('traefik.*.frontend.rule', prop):
+            if re.match(r'traefik.*.frontend.rule', prop):
                 value = s.attrs.get(u'Spec').get(u'TaskTemplate').get(u'ContainerSpec').get(u'Labels').get(prop)
                 if 'Host' in value:
                     value = value.split("Host:")[1].strip()
@@ -286,7 +302,7 @@ def check_container_t2(c):
     def label_host():
         for prop in c.attrs.get(u'Config').get(u'Labels'):
             value = c.attrs.get(u'Config').get(u'Labels').get(prop)
-            if re.match('traefik.*?\.rule', prop):
+            if re.match(r'traefik.*?\.rule', prop):
                 if 'Host' in value:
                     logger.debug("Container ID: %s rule value: %s", cont_id, value)
                     extracted_domains = re.findall(r'\`([a-zA-Z0-9\.\-]+)\`', value)
@@ -319,7 +335,7 @@ def check_service_t2(s):
     def label_host():
         for prop in s.attrs.get(u'Spec').get(u'Labels'):
            value = s.attrs.get(u'Spec').get(u'Labels').get(prop)
-           if re.match('traefik.*?\.rule', prop):
+           if re.match(r'traefik.*?\.rule', prop):
                if 'Host' in value:
                    logger.debug("Service ID: %s rule value: %s", cont_id, value)
                    extracted_domains = re.findall(r'\`([a-zA-Z0-9\.\-]+)\`', value)
