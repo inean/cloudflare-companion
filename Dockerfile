@@ -1,5 +1,5 @@
 ARG DISTRO="alpine"
-ARG DISTRO_VARIANT="3.20"
+ARG DISTRO_VARIANT="latest"
 
 FROM docker.io/tiredofit/${DISTRO}:${DISTRO_VARIANT}
 LABEL maintainer="Dave Conroy (github.com/tiredofit)"
@@ -7,8 +7,8 @@ LABEL maintainer="Dave Conroy (github.com/tiredofit)"
 ENV CONTAINER_ENABLE_MESSAGING=FALSE \
     CONTAINER_ENABLE_SCHEDULING=FALSE \
     CONTAINER_PROCESS_RUNAWAY_PROTECTOR=FALSE \
-    IMAGE_NAME="tiredofit/traefik-cloudflare-companion" \
-    IMAGE_REPO_URL="https://github.com/tiredofit/docker-traefik-cloudflare-companion/"
+    IMAGE_NAME="inean/traefik-cloudflare-companion" \
+    IMAGE_REPO_URL="https://github.com/inean/docker-traefik-cloudflare-companion/"
 
 RUN source /assets/functions/00-container && \
     set -x && \
