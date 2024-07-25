@@ -1,9 +1,0 @@
-#!/command/with-contenv bash
-
-source /assets/functions/00-container
-prepare_service single
-PROCESS_NAME="traefik-cloudflare-companion"
-
-bootstrap_filesystem
-sanity_test
-liftoff

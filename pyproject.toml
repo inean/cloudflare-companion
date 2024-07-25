@@ -3,7 +3,7 @@ authors = [
     { name = "Carlos Martín", email = "inean.es@gmail.com" },
 ]
 dependencies = [
-    "cloudflare>=3.1.0",
+    "cloudflare == 2.19.*",
     "docker>=7.1.0",
 ]
 description = "This will build a Docker image to automatically update Cloudflare DNS records upon container start when using Traefik as a Reverse Proxy"
