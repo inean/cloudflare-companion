@@ -1,15 +1,23 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options
 {
-    "name": "Rye",
-    "build": {
-        "context": "..",
-        "dockerfile": "Dockerfile"
-    },
+    "name": "CloudFlare DNS Updater",
+    "shutdownAction": "stopCompose",
+    "workspaceFolder": "/workspace",
+
+    // Docker Compose Options
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "devcontainer",
+
     "features": {
-        "ghcr.io/dhoeric/features/hadolint:1": { }
+        "ghcr.io/dhoeric/features/hadolint:1": { },
+        "ghcr.io/devcontainers/features/docker-outside-of-docker": {
+            "postCreateCommand": "sudo usermod -aG docker vscode"
+        }
     },
     "customizations": {
         "vscode": {
             "extensions": [
+                // Python exrtensions
                 "charliermarsh.ruff",
                 "codezombiech.gitignore",
                 "exiasr.hadolint",
@@ -22,6 +30,8 @@
                 "shardulm94.trailing-spaces",
                 "usernamehw.errorlens",
                 "yzhang.markdown-all-in-one"
+
+                // Project related extensions
             ],
             "settings": {
                 "python.defaultInterpreterPath": "/opt/rye/shims/python",
@@ -45,17 +55,15 @@
         }
     },
 
+    // Forward traefik dashboard port
+    "forwardPorts": [ 8080 ],
+
     // Use 'postCreateCommand' to run commands after the container is created.
     "postCreateCommand": "rye sync",
 
     // use 'postStartCommand' to run commands after the container is started.
     "postStartCommand": "rye run pre-commit install",
 
-    // Make podman work. Ensure podman machine is running a rootless podman,
-    // otherwise keep-id feature is ignored.
-    "runArgs": [
-        "--userns=keep-id:uid=1000,gid=1000"
-    ],
     "containerUser": "vscode"
 
     // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.

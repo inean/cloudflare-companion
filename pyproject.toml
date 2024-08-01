@@ -5,6 +5,8 @@ authors = [
 dependencies = [
     "cloudflare == 2.19.*",
     "docker>=7.1.0",
+    "pydantic-settings>=2.3.4",
+    "pydantic-settings-file-envar>=0.1.0",
 ]
 description = "This will build a Docker image to automatically update Cloudflare DNS records upon container start when using Traefik as a Reverse Proxy"
 name = "cloudflare-companion"
