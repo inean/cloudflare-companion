@@ -9,4 +9,4 @@ wheels/
 # venv
 .venv
 .env
-*.lock
+requirements-dev.lock

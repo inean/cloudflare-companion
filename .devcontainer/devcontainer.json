@@ -34,17 +34,18 @@
                 // Project related extensions
             ],
             "settings": {
-                "python.defaultInterpreterPath": "/opt/rye/shims/python",
+                "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
                 "[python]": {
-                    "editor.defaultFormatter": "charliermarsh.ruff",
                     "editor.codeActionsOnSave": {
-                        "source.fixAll.ruff": "explicit",
-                        "source.organizeImports.ruff": "explicit"
+                        "source.fixAll": "explicit",
+                        "source.organizeImports": "explicit"
                     },
-                    "editor.formatOnSave": true
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.formatOnSave": true,
+                    "editor.rulers": [
+                        88
+                    ]
                 },
-                "files.insertFinalNewline": true,
-                "files.trimTrailingWhitespace": true,
                 "terminal.integrated.defaultProfile.linux": "zsh",
                 "terminal.integrated.profiles.linux": {
                     "zsh": {
@@ -59,11 +60,12 @@
     "forwardPorts": [ 8080 ],
 
     // Use 'postCreateCommand' to run commands after the container is created.
-    "postCreateCommand": "rye sync",
+    "postCreateCommand": "rye sync -f",
 
     // use 'postStartCommand' to run commands after the container is started.
-    "postStartCommand": "rye run pre-commit install",
+    "postStartCommand": "which git && rye run pre-commit install",
 
+    // Run vscode-server as non-root user
     "containerUser": "vscode"
 
     // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.

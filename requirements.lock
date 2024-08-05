@@ -11,6 +11,7 @@
 
 annotated-types==0.7.0
     # via pydantic
+asyncio==3.4.3
 attrs==23.2.0
     # via jsonlines
 certifi==2024.7.4

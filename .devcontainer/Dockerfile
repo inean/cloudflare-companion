@@ -1,33 +1,31 @@
+# syntax=docker/dockerfile:1.0
+
 # Builder image
 FROM debian:bookworm-slim AS builder
 
 # hadolint ignore=DL3008
 RUN <<EOF
-apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl
 EOF
 
-# Install rye
+# Install and initialize rye
 ENV RYE_HOME="/opt/rye"
 ENV PATH="$RYE_HOME/shims:$PATH"
 
-SHELL [ "/bin/bash", "-o", "pipefail", "-c" ]
-RUN curl -sSf https://rye.astral.sh/get | RYE_INSTALL_OPTION="--yes" bash \
-    && rye config --set-bool behavior.global-python=true \
-    && rye config --set-bool behavior.use-uv=true
+# hadolint ignore=DL4006
+RUN <<EOF
+    curl -sSf https://rye.astral.sh/get | RYE_INSTALL_OPTION="--yes" bash
+    rye config --set-bool behavior.global-python=true
+    rye config --set-bool behavior.use-uv=true
+EOF
 
-# Initialize rye
+# Copy project
 WORKDIR /opt
 
-COPY ./.python-version \
-    ./pyproject.toml  \
-    ./requirements*   \
-    ./
-
-RUN <<EOF
-    rye pin "$(cat .python-version)"
-    rye sync
-EOF
+# Find pinned python version on current project and download it
+COPY ./.python-version ./
+RUN rye pin "$(cat .python-version)"
 
 # Devcontainer image
 FROM mcr.microsoft.com/vscode/devcontainers/base:bookworm
@@ -37,6 +35,7 @@ ENV RYE_HOME="/opt/rye"
 ENV PATH="$RYE_HOME/shims:$PATH"
 ENV PYTHONUNBUFFERED=True
 
+# Use rye as the default python and uv as default package manager
 RUN <<EOF
     rye config --set-bool behavior.global-python=true
     rye config --set-bool behavior.use-uv=true

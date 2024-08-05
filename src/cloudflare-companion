@@ -1,9 +1,9 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 from __future__ import print_function
+import asyncio
 from datetime import datetime
 
-import atexit
 from typing import Literal
 from typing_extensions import Self
 import CloudFlare
@@ -15,7 +15,6 @@ import docker.errors
 import requests
 import sys
 import time
-import threading
 from urllib.parse import urlparse
 
 from pydantic import ValidationError, BaseModel, model_validator
@@ -31,10 +30,32 @@ EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value
 EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars
 
 
-class RepeatedTimer(threading.Timer):
-    def run(self):
-        while not self.finished.wait(self.interval):
+class AsyncRepeatedTimer:
+    def __init__(
+        self,
+        interval: int,
+        function: callable,
+        *,
+        args: tuple | None = None,
+        kwargs: dict | None = None,
+    ):
+        self.interval = interval
+        self.function = function
+        self.args = args or []
+        self.kwargs = kwargs or {}
+        self.task = None
+
+    async def _run(self):
+        while True:
+            await asyncio.sleep(self.interval)
             self.function(*self.args, **self.kwargs)
+
+    def start(self):
+        self.task = asyncio.create_task(self._run())
+        return self.task
+
+    def cancel(self):
+        self.task and self.task.cancel()
 
 
 class DomainsModel(BaseModel):
@@ -47,7 +68,7 @@ class DomainsModel(BaseModel):
     excluded_sub_domains: list[str] = []
 
 
-class ExampleSettings(BaseSettings):
+class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         validate_default=False,
         extra="ignore",
@@ -72,7 +93,7 @@ class ExampleSettings(BaseSettings):
     traefik_filter: str | None = None
     traefik_filter_label: str = "traefik.constraint"
     refresh_entries: bool = False
-    traefik_poll_seconds: int = 60
+    traefik_poll_seconds: int = 5
     traefik_poll_url: str | None = None
     traefik_included_hosts: list[re.Pattern] = []
     traefik_excluded_hosts: list[re.Pattern] = []
@@ -97,6 +118,7 @@ class ExampleSettings(BaseSettings):
     def update_traefik_domains(self) -> Self:
         if len(self.traefik_included_hosts) == 0:
             self.traefik_included_hosts.append(re.compile(".*"))
+        return self
 
     @model_validator(mode="after")
     def sanity_options(self) -> Self:
@@ -167,7 +189,7 @@ def is_matching(host, regexes):
 
 
 # Start Program to update the Cloudflare
-def point_domain(name, domain_infos: list[DomainsModel]):
+def point_domain(cf, settings, name, domain_infos: list[DomainsModel]):
     ok = True
     for domain_info in domain_infos:
         if name == domain_info.target_domain:
@@ -265,7 +287,7 @@ def point_domain(name, domain_infos: list[DomainsModel]):
     return ok
 
 
-def check_container_t2(c):
+def check_container_t2(c, settings):
     def label_host():
         for prop in c.attrs.get("Config").get("Labels"):
             value = c.attrs.get("Config").get("Labels").get(prop)
@@ -316,9 +338,9 @@ def check_container_t2(c):
     return mappings
 
 
-def check_traefik(included_hosts, excluded_hosts):
+def check_traefik(settings, included_hosts, excluded_hosts):
     mappings = {}
-    logger.debug("Called check_traefik")
+    logger.debug("Called check_traefik poller")
     r = requests.get("{}/api/http/routers".format(settings.traefik_poll_url))
     if r.ok:
         for router in r.json():
@@ -385,7 +407,9 @@ def check_traefik(included_hosts, excluded_hosts):
     return mappings
 
 
-def check_traefik_and_sync_mappings(included_hosts, excluded_hosts, domain_infos):
+def check_traefik_and_sync_mappings(
+    cf, settings, included_hosts, excluded_hosts, domain_infos
+):
     """
     Checks Traefik for mappings and syncs them with the domain information.
 
@@ -395,9 +419,9 @@ def check_traefik_and_sync_mappings(included_hosts, excluded_hosts, domain_infos
         domain_infos (dict): Domain information for synchronization.
     """
     # Extract mappings from Traefik
-    traefik_mappings = check_traefik(included_hosts, excluded_hosts)
+    traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts)
     # Sync the extracted mappings with the domain information
-    sync_mappings(traefik_mappings, domain_infos)
+    sync_mappings(cf, settings, traefik_mappings, domain_infos)
 
 
 def add_to_mappings(current_mappings, mappings):
@@ -417,7 +441,7 @@ def add_to_mappings(current_mappings, mappings):
 synced_mappings = {}
 
 
-def sync_mappings(mappings, domain_infos):
+def sync_mappings(cf, settings, mappings, domain_infos):
     """
     Synchronizes the mappings with the domain information.
 
@@ -428,11 +452,11 @@ def sync_mappings(mappings, domain_infos):
     for k, v in mappings.items():
         current_mapping = synced_mappings.get(k)
         if current_mapping is None or current_mapping > v:
-            if point_domain(k, domain_infos):
+            if point_domain(cf, settings, k, domain_infos):
                 synced_mappings[k] = v
 
 
-def get_initial_mappings(included_hosts, excluded_hosts):
+def get_initial_mappings(client, settings, included_hosts, excluded_hosts):
     """
     Initializes the mappings by discovering Docker containers and Traefik services.
 
@@ -449,12 +473,12 @@ def get_initial_mappings(included_hosts, excluded_hosts):
     if settings.enable_docker_poll:
         for c in client.containers.list():
             logger.debug("Container List Discovery Loop")
-            add_to_mappings(mappings, check_container_t2(c))
+            add_to_mappings(mappings, check_container_t2(c, settings))
 
     if settings.traefik_poll_url:
         logger.debug("Traefik List Discovery Loop")
         # Extract mappings from Traefik
-        traefik_mappings = check_traefik(included_hosts, excluded_hosts)
+        traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts)
         # Add the extracted mappings to the current mappings
         add_to_mappings(mappings, traefik_mappings)
 
@@ -469,107 +493,166 @@ def uri_valid(x):
         return False
 
 
-# Load settings
-try:
-    settings = ExampleSettings()  # type: ignore[call-arg]
+def report_current_status_and_settings(logger: logging.Logger, settings: Settings):
+    if settings.dry_run:
+        logger.warning(f"Dry Run: {settings.dry_run}")
+    logger.debug(f"Docker Polling: {settings.enable_docker_poll}")
+    logger.debug(f"Refresh Entries: {settings.refresh_entries}")
+    logger.debug(f"Default TTL: {settings.default_ttl}")
 
-    # Check for uppercase docker secrets or env variables
-    assert settings.cf_token
-    assert settings.target_domain
-    assert len(settings.domains) > 0
+    if settings.enable_traefik_poll:
+        if uri_valid(settings.traefik_poll_url):
+            logger.debug("Traefik Poll Url: %s", settings.traefik_poll_url)
+            logger.debug("Traefik Poll Seconds: %s", settings.traefik_poll_seconds)
+        else:
+            settings.enable_traefik_poll = False
+            logger.error(
+                "Traefik Polling Mode disabled because traefik url is invalid: %s",
+                settings.traefik_poll_url,
+            )
 
-except ValidationError as e:
-    print(f"Unable to load settings: {e}", file=sys.stderr)
-    sys.exit(1)
+    logger.debug("Traefik Polling Mode: %s", False)
 
-# Set up logging and dump runtime settings
-logger = get_logger(settings)
-if settings.dry_run:
-    logger.warning(f"Dry Run: {settings.dry_run}")
-logger.debug(f"Docker Polling: {settings.enable_docker_poll}")
-logger.debug(f"Refresh Entries: {settings.refresh_entries}")
-logger.debug(f"Default TTL: {settings.default_ttl}")
+    for dom in settings.domains:
+        logger.debug("Domain Configuration: %s", dom)
 
-if settings.enable_traefik_poll:
-    if uri_valid(settings.traefik_poll_url):
-        logger.debug("Traefik Poll Url: %s", settings.traefik_poll_url)
-        logger.debug("Traefik Poll Seconds: %s", settings.traefik_poll_seconds)
+
+def init_cloudflare_agent(logger: logging.Logger, settings: Settings):
+    # Init Cloudflare client
+    cf_debug = settings.log_level.upper() == "VERBOSE"
+    if not settings.cf_email:
+        logger.debug("API Mode: Scoped")
+        cf = CloudFlare.CloudFlare(debug=cf_debug, token=settings.cf_token)
     else:
-        settings.enable_traefik_poll = False
-        logger.error(
-            "Traefik Polling Mode disabled because traefik url is invalid: %s",
-            settings.traefik_poll_url,
+        logger.debug("API Mode: Global")
+        cf = CloudFlare.CloudFlare(
+            debug=cf_debug, email=settings.cf_email, token=settings.cf_token
         )
+    return cf
 
-logger.debug("Traefik Polling Mode: %s", False)
 
-for dom in settings.domains:
-    logger.debug("Domain Configuration: %s", dom)
-
-# Init Cloudflare client
-cf_debug = settings.log_level.upper() == "VERBOSE"
-if not settings.cf_email:
-    logger.debug("API Mode: Scoped")
-    cf = CloudFlare.CloudFlare(debug=cf_debug, token=settings.cf_token)
-else:
-    logger.debug("API Mode: Global")
-    cf = CloudFlare.CloudFlare(
-        debug=cf_debug, email=settings.cf_email, token=settings.cf_token
-    )
-
-# Init Docker client, if needed
-if settings.enable_docker_poll:
+def init_docker_agent(logger: logging.Logger, settings: Settings):
+    # Init Docker client
     try:
         client = docker.from_env()
     except docker.errors.DockerException as e:
         logger.error(f"Could not connect to Docker: {e}")
-        logger.error(f"Known DOCKER_HOST env is  '{os.getenv('DOCKER_HOST') or ''}'")
-        exit(1)
+        logger.error(f"Known DOCKER_HOST env is '{os.getenv('DOCKER_HOST') or ''}'")
+        sys.exit(1)
 
-sync_mappings(
-    get_initial_mappings(
-        settings.traefik_included_hosts, settings.traefik_excluded_hosts
-    ),
-    settings.domains,
-)
+    logger.debug("Connected to Docker")
+    return client
 
-# Start traefik polling on a separate thread
-if settings.enable_traefik_poll:
-    logger.debug("Starting traefik router polling")
-    traefik_poll = RepeatedTimer(
-        settings.traefik_poll_seconds,
-        check_traefik_and_sync_mappings,
-        args=(
-            settings.traefik_included_hosts,
-            settings.traefik_excluded_hosts,
-            settings.domains,
-        ),
-    )
-    traefik_poll.start()
-    atexit.register(traefik_poll.cancel)
 
-# Start po
-if settings.enable_docker_poll:
+async def watch_events(dk_agent, cf_agent, settings):
     t = datetime.now().strftime("%s")
 
-    logger.debug("Starting event watch routines")
+    logger.debug("Starting event watch docker events")
     logger.debug("Time: %s", t)
     forever = 0
 
     while forever < 777:
-        for event in client.events(
+        logger.debug("Called docker poller")
+        t_next = datetime.now().strftime("%s")
+        events = dk_agent.events(
             since=t,
+            until=t_next,
             filters={"Type": "service", "Action": "update", "status": "start"},
             decode=True,
-        ):
-            new_mappings = {}
+        )
+        new_mappings = {}
+        for event in events:
             if event.get("status") == "start":
                 try:
+                    container = await asyncio.to_thread(
+                        dk_agent.containers.get, event.get("id")
+                    )
                     add_to_mappings(
                         new_mappings,
-                        check_container_t2(client.containers.get(event.get("id"))),
+                        check_container_t2(container, settings),
                     )
                 except docker.errors.NotFound:
                     forever = 778
                     pass
-            sync_mappings(new_mappings, settings.domains)
+        sync_mappings(cf_agent, settings, new_mappings, settings.domains)
+        t = t_next
+        await asyncio.sleep(5)  # Sleep for 5 seconds before checking for new events
+
+
+logger = None
+
+
+async def main():
+    # Load settings
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+
+        # Check for uppercase docker secrets or env variables
+        assert settings.cf_token
+        assert settings.target_domain
+        assert len(settings.domains) > 0
+
+    except ValidationError as e:
+        print(f"Unable to load settings: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Set up logging and dump runtime settings
+    global logger
+    logger = get_logger(settings)
+    report_current_status_and_settings(logger, settings)
+
+    # Init agents
+    cf_agent = init_cloudflare_agent(logger, settings)
+    dk_agent = None
+    if settings.enable_docker_poll:
+        dk_agent = init_docker_agent(logger, settings)
+
+    # Init mappings
+    mappings = get_initial_mappings(
+        dk_agent,
+        settings,
+        settings.traefik_included_hosts,
+        settings.traefik_excluded_hosts,
+    )
+    sync_mappings(cf_agent, settings, mappings, settings.domains)
+
+    # Start traefik polling on a separate thread
+    polls = []
+    if settings.enable_traefik_poll:
+        logger.debug("Starting traefik router polling")
+        traefik_poll = AsyncRepeatedTimer(
+            settings.traefik_poll_seconds,
+            check_traefik_and_sync_mappings,
+            args=(
+                cf_agent,
+                settings,
+                settings.traefik_included_hosts,
+                settings.traefik_excluded_hosts,
+                settings.domains,
+            ),
+        )
+        polls.append(traefik_poll.start())
+
+    # Start docker polleer
+    if settings.enable_docker_poll:
+        docker_poll = asyncio.create_task(watch_events(dk_agent, cf_agent, settings))
+        polls.append(docker_poll)
+
+    # Run pollers in parallel
+    try:
+        await asyncio.gather(*polls)
+    except asyncio.CancelledError:
+        logger.info("Pollers were stopped...")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Exiting...")
+        for task in asyncio.all_tasks():
+            task.cancel()
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        sys.exit(1)
