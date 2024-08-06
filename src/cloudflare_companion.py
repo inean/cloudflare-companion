@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 
 from __future__ import print_function
-import asyncio
-from datetime import datetime
 
-from typing import Literal
-from typing_extensions import Self
-import CloudFlare
-import docker
+import asyncio
 import logging
 import os
 import re
-import docker.errors
-import requests
 import sys
 import time
+from datetime import datetime
+from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import ValidationError, BaseModel, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict, EnvSettingsSource
+import CloudFlare
+import docker
+import docker.errors
+import requests
 
 # Inject custom methods into EventSettingsSource tu get support for:
 # - _FIELD  like env vars
 # -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
 #
 from _settings import _EnvSettingsSource
+from pydantic import BaseModel, ValidationError, model_validator
+from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
+from typing_extensions import Self
 
 EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value
 EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars
@@ -128,7 +128,7 @@ class Settings(BaseSettings):
 
 
 # set up logging
-def get_logger(settings):
+def initialize_logger(settings):
     # Extract attributes from settings and convert to uppercase
     log_level = settings.log_level.upper()
     log_type = settings.log_type.upper()
@@ -166,9 +166,9 @@ def get_logger(settings):
     return logger
 
 
-def is_domain_excluded(name, dom: DomainsModel):
+def is_domain_excluded(logger, name, dom: DomainsModel):
     for sub_dom in dom.excluded_sub_domains:
-        fqdn_with_sub_dom = sub_dom + "." + dom["name"]
+        fqdn_with_sub_dom = sub_dom + "." + dom.name
 
         if name.find(fqdn_with_sub_dom) != -1:
             logger.info(
@@ -189,14 +189,14 @@ def is_matching(host, regexes):
 
 
 # Start Program to update the Cloudflare
-def point_domain(cf, settings, name, domain_infos: list[DomainsModel]):
+def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
     ok = True
     for domain_info in domain_infos:
         if name == domain_info.target_domain:
             continue
 
         if name.find(domain_info.name) >= 0:
-            if is_domain_excluded(name, domain_info):
+            if is_domain_excluded(logger, name, domain_info):
                 continue
 
             records = None
@@ -221,10 +221,10 @@ def point_domain(cf, settings, name, domain_infos: list[DomainsModel]):
             data = {
                 "type": settings.rc_type,
                 "name": name,
-                "content": domain_info["target_domain"],
-                "ttl": int(domain_info["ttl"]),
-                "proxied": domain_info["proxied"],
-                "comment": domain_info["comment"],
+                "content": domain_info.target_domain,
+                "ttl": int(domain_info.ttl),
+                "proxied": domain_info.proxied,
+                "comment": domain_info.comment,
             }
             if settings.refresh_entries:
                 try:
@@ -232,35 +232,35 @@ def point_domain(cf, settings, name, domain_infos: list[DomainsModel]):
                         if settings.dry_run:
                             logger.info(
                                 "DRY-RUN: POST to Cloudflare %s:, %s",
-                                domain_info["zone_id"],
+                                domain_info.zone_id,
                                 data,
                             )
                         else:
                             _ = cf.zones.dns_records.post(
-                                domain_info["zone_id"], data=data
+                                domain_info.zone_id, data=data
                             )
                         logger.info(
                             "Created new record: %s to point to %s",
                             name,
-                            domain_info["target_domain"],
+                            domain_info.target_domain,
                         )
                     else:
                         for record in records:
                             if settings.dry_run:
                                 logger.info(
                                     "DRY-RUN: PUT to Cloudflare %s, %s:, %s",
-                                    domain_info["zone_id"],
+                                    domain_info.zone_id,
                                     record["id"],
                                     data,
                                 )
                             else:
                                 cf.zones.dns_records.put(
-                                    domain_info["zone_id"], record["id"], data=data
+                                    domain_info.zone_id, record["id"], data=data
                                 )
                             logger.info(
                                 "Updated existing record: %s to point to %s",
                                 name,
-                                domain_info["target_domain"],
+                                domain_info.target_domain,
                             )
                 except CloudFlare.exceptions.CloudFlareAPIError as ex:
                     logger.error("** %s - %d %s" % (name, ex, ex))
@@ -271,15 +271,15 @@ def point_domain(cf, settings, name, domain_infos: list[DomainsModel]):
                     if settings.dry_run:
                         logger.info(
                             "DRY-RUN: POST to Cloudflare %s:, %s",
-                            domain_info["zone_id"],
+                            domain_info.zone_id,
                             data,
                         )
                     else:
-                        _ = cf.zones.dns_records.post(domain_info["zone_id"], data=data)
+                        _ = cf.zones.dns_records.post(domain_info.zone_id, data=data)
                     logger.info(
                         "Created new record: %s to point to %s",
                         name,
-                        domain_info["target_domain"],
+                        domain_info.target_domain,
                     )
                 except CloudFlare.exceptions.CloudFlareAPIError as ex:
                     logger.error("** %s - %d %s" % (name, ex, ex))
@@ -441,7 +441,7 @@ def add_to_mappings(current_mappings, mappings):
 synced_mappings = {}
 
 
-def sync_mappings(cf, settings, mappings, domain_infos):
+def sync_mappings(cf, settings, mappings, domain_infos, logger):
     """
     Synchronizes the mappings with the domain information.
 
@@ -452,7 +452,7 @@ def sync_mappings(cf, settings, mappings, domain_infos):
     for k, v in mappings.items():
         current_mapping = synced_mappings.get(k)
         if current_mapping is None or current_mapping > v:
-            if point_domain(cf, settings, k, domain_infos):
+            if point_domain(cf, settings, k, domain_infos, logger):
                 synced_mappings[k] = v
 
 
@@ -574,12 +574,16 @@ async def watch_events(dk_agent, cf_agent, settings):
                 except docker.errors.NotFound:
                     forever = 778
                     pass
-        sync_mappings(cf_agent, settings, new_mappings, settings.domains)
+        sync_mappings(cf_agent, settings, new_mappings, settings.domains, logger)
         t = t_next
         await asyncio.sleep(5)  # Sleep for 5 seconds before checking for new events
 
 
 logger = None
+
+
+def get_logger():
+    return logger
 
 
 async def main():
@@ -598,7 +602,7 @@ async def main():
 
     # Set up logging and dump runtime settings
     global logger
-    logger = get_logger(settings)
+    logger = initialize_logger(settings)
     report_current_status_and_settings(logger, settings)
 
     # Init agents
