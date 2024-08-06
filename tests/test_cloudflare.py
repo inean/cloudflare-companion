@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import CloudFlare
 import pytest
 from cloudflare_companion import (
-    CloudFlareUpdater,
+    CloudFlareZones,
     DomainsModel,
     Settings,
 )
@@ -53,7 +53,7 @@ def mock_domain_infos():
 def test_point_domain_target_domain_match(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
-    result = CloudFlareUpdater.point_domain(
+    result = CloudFlareZones.point_domain(
         mock_cloudflare,
         mock_settings,
         "target.example.com",
@@ -68,7 +68,7 @@ def test_point_domain_excluded_domain(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_domain_infos[0].excluded_sub_domains = ["sub"]
-    result = CloudFlareUpdater.point_domain(
+    result = CloudFlareZones.point_domain(
         mock_cloudflare,
         mock_settings,
         "sub.example.com",
@@ -83,7 +83,7 @@ def test_point_domain_create_new_record(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_cloudflare.zones.dns_records.get.return_value = []
-    result = CloudFlareUpdater.point_domain(
+    result = CloudFlareZones.point_domain(
         mock_cloudflare,
         mock_settings,
         "new.example.com",
@@ -98,7 +98,7 @@ def test_point_domain_update_existing_record(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_cloudflare.zones.dns_records.get.return_value = [{"id": "record_id"}]
-    result = CloudFlareUpdater.point_domain(
+    result = CloudFlareZones.point_domain(
         mock_cloudflare,
         mock_settings,
         "existing.example.com",
@@ -118,7 +118,7 @@ def test_point_domain_rate_limit_retry(
         [],
     ]
     with patch("time.sleep", return_value=None):
-        result = CloudFlareUpdater.point_domain(
+        result = CloudFlareZones.point_domain(
             mock_cloudflare,
             mock_settings,
             "rate_limited.example.com",
@@ -134,7 +134,7 @@ def test_point_domain_dry_run(
 ):
     mock_settings.dry_run = True
     mock_cloudflare.zones.dns_records.get.return_value = []
-    result = CloudFlareUpdater.point_domain(
+    result = CloudFlareZones.point_domain(
         mock_cloudflare,
         mock_settings,
         "dryrun.example.com",

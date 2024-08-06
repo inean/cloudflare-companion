@@ -7,9 +7,8 @@ import logging
 import os
 import re
 import sys
-import time
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypedDict
 from urllib.parse import urlparse
 
 import CloudFlare
@@ -188,10 +187,41 @@ def is_matching(host, regexes):
     return False
 
 
-class CloudFlareUpdater:
-    def __init__(self, settings: Settings, logger: logging.Logger):
+class CloudFlareConfig(TypedDict, total=False):
+    max_retries: int
+    """Max number of retries to attempt before exponential backoff fails"""
+
+
+class CloudFlareException(Exception):
+    pass
+
+
+class CloudFlareZones:
+    config: CloudFlareConfig = {
+        "max_retries": 5,
+    }
+
+    def __init__(
+        self,
+        client: CloudFlare.CloudFlare,
+        settings: Settings,
+        logger: logging.Logger,
+    ):
+        self.client = client
         self.settings = settings
         self.logger = logger
+
+    async def get(self, zone_id: str, name: str):
+        for retry in range(self.config["max_retries"]):
+            try:
+                return self.client.zones.dns_records.get(zone_id, params={"name": name})
+            except CloudFlare.exceptions.CloudFlareAPIError as e:
+                if "Rate limited" in str(e):
+                    sleep_time = 2 ** (retry + 1)
+                    asyncio.sleep(sleep_time)  # Exponential backoff
+                else:
+                    raise e
+        raise CloudFlareException("Max retries exceeded")
 
     # Start Program to update the Cloudflare
     @staticmethod
@@ -205,23 +235,9 @@ class CloudFlareUpdater:
                 if is_domain_excluded(logger, name, domain_info):
                     continue
 
-                records = None
-                retry = 0
-                while retry < 5:  # maximum of 5 retries
-                    try:
-                        records = cf.zones.dns_records.get(
-                            domain_info.zone_id, params={"name": name}
-                        )
-                        break
-                    except CloudFlare.exceptions.CloudFlareAPIError as e:
-                        if "Rate limited" in str(
-                            e
-                        ):  # Check for rate limit error message
-                            retry += 1
-                            time.sleep(2**retry)  # Exponential backoff
-                        else:
-                            raise e
-
+                records = asyncio.run(
+                    CloudFlareZones(cf, settings, logger).get(domain_info.zone_id, name)
+                )
                 if records is None:
                     ok = False
                     continue
@@ -462,7 +478,7 @@ def sync_mappings(cf, settings, mappings, domain_infos, logger):
     for k, v in mappings.items():
         current_mapping = synced_mappings.get(k)
         if current_mapping is None or current_mapping > v:
-            if CloudFlareUpdater.point_domain(cf, settings, k, domain_infos, logger):
+            if CloudFlareZones.point_domain(cf, settings, k, domain_infos, logger):
                 synced_mappings[k] = v
 
 
