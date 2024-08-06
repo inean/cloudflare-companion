@@ -188,47 +188,94 @@ def is_matching(host, regexes):
     return False
 
 
-# Start Program to update the Cloudflare
-def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
-    ok = True
-    for domain_info in domain_infos:
-        if name == domain_info.target_domain:
-            continue
+class CloudFlareUpdater:
+    def __init__(self, settings: Settings, logger: logging.Logger):
+        self.settings = settings
+        self.logger = logger
 
-        if name.find(domain_info.name) >= 0:
-            if is_domain_excluded(logger, name, domain_info):
+    # Start Program to update the Cloudflare
+    @staticmethod
+    def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
+        ok = True
+        for domain_info in domain_infos:
+            if name == domain_info.target_domain:
                 continue
 
-            records = None
-            retry = 0
-            while retry < 5:  # maximum of 5 retries
-                try:
-                    records = cf.zones.dns_records.get(
-                        domain_info.zone_id, params={"name": name}
-                    )
-                    break
-                except CloudFlare.exceptions.CloudFlareAPIError as e:
-                    if "Rate limited" in str(e):  # Check for rate limit error message
-                        retry += 1
-                        time.sleep(2**retry)  # Exponential backoff
-                    else:
-                        raise e
+            if name.find(domain_info.name) >= 0:
+                if is_domain_excluded(logger, name, domain_info):
+                    continue
 
-            if records is None:
-                ok = False
-                continue
+                records = None
+                retry = 0
+                while retry < 5:  # maximum of 5 retries
+                    try:
+                        records = cf.zones.dns_records.get(
+                            domain_info.zone_id, params={"name": name}
+                        )
+                        break
+                    except CloudFlare.exceptions.CloudFlareAPIError as e:
+                        if "Rate limited" in str(
+                            e
+                        ):  # Check for rate limit error message
+                            retry += 1
+                            time.sleep(2**retry)  # Exponential backoff
+                        else:
+                            raise e
 
-            data = {
-                "type": settings.rc_type,
-                "name": name,
-                "content": domain_info.target_domain,
-                "ttl": int(domain_info.ttl),
-                "proxied": domain_info.proxied,
-                "comment": domain_info.comment,
-            }
-            if settings.refresh_entries:
-                try:
-                    if len(records) == 0:
+                if records is None:
+                    ok = False
+                    continue
+
+                data = {
+                    "type": settings.rc_type,
+                    "name": name,
+                    "content": domain_info.target_domain,
+                    "ttl": int(domain_info.ttl),
+                    "proxied": domain_info.proxied,
+                    "comment": domain_info.comment,
+                }
+                if settings.refresh_entries:
+                    try:
+                        if len(records) == 0:
+                            if settings.dry_run:
+                                logger.info(
+                                    "DRY-RUN: POST to Cloudflare %s:, %s",
+                                    domain_info.zone_id,
+                                    data,
+                                )
+                            else:
+                                _ = cf.zones.dns_records.post(
+                                    domain_info.zone_id, data=data
+                                )
+                            logger.info(
+                                "Created new record: %s to point to %s",
+                                name,
+                                domain_info.target_domain,
+                            )
+                        else:
+                            for record in records:
+                                if settings.dry_run:
+                                    logger.info(
+                                        "DRY-RUN: PUT to Cloudflare %s, %s:, %s",
+                                        domain_info.zone_id,
+                                        record["id"],
+                                        data,
+                                    )
+                                else:
+                                    cf.zones.dns_records.put(
+                                        domain_info.zone_id, record["id"], data=data
+                                    )
+                                logger.info(
+                                    "Updated existing record: %s to point to %s",
+                                    name,
+                                    domain_info.target_domain,
+                                )
+                    except CloudFlare.exceptions.CloudFlareAPIError as ex:
+                        logger.error("** %s - %d %s" % (name, ex, ex))
+                        ok = False
+                        pass
+                else:
+                    try:
                         if settings.dry_run:
                             logger.info(
                                 "DRY-RUN: POST to Cloudflare %s:, %s",
@@ -244,47 +291,10 @@ def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
                             name,
                             domain_info.target_domain,
                         )
-                    else:
-                        for record in records:
-                            if settings.dry_run:
-                                logger.info(
-                                    "DRY-RUN: PUT to Cloudflare %s, %s:, %s",
-                                    domain_info.zone_id,
-                                    record["id"],
-                                    data,
-                                )
-                            else:
-                                cf.zones.dns_records.put(
-                                    domain_info.zone_id, record["id"], data=data
-                                )
-                            logger.info(
-                                "Updated existing record: %s to point to %s",
-                                name,
-                                domain_info.target_domain,
-                            )
-                except CloudFlare.exceptions.CloudFlareAPIError as ex:
-                    logger.error("** %s - %d %s" % (name, ex, ex))
-                    ok = False
-                    pass
-            else:
-                try:
-                    if settings.dry_run:
-                        logger.info(
-                            "DRY-RUN: POST to Cloudflare %s:, %s",
-                            domain_info.zone_id,
-                            data,
-                        )
-                    else:
-                        _ = cf.zones.dns_records.post(domain_info.zone_id, data=data)
-                    logger.info(
-                        "Created new record: %s to point to %s",
-                        name,
-                        domain_info.target_domain,
-                    )
-                except CloudFlare.exceptions.CloudFlareAPIError as ex:
-                    logger.error("** %s - %d %s" % (name, ex, ex))
-                    ok = False
-    return ok
+                    except CloudFlare.exceptions.CloudFlareAPIError as ex:
+                        logger.error("** %s - %d %s" % (name, ex, ex))
+                        ok = False
+        return ok
 
 
 def check_container_t2(c, settings):
@@ -452,7 +462,7 @@ def sync_mappings(cf, settings, mappings, domain_infos, logger):
     for k, v in mappings.items():
         current_mapping = synced_mappings.get(k)
         if current_mapping is None or current_mapping > v:
-            if point_domain(cf, settings, k, domain_infos, logger):
+            if CloudFlareUpdater.point_domain(cf, settings, k, domain_infos, logger):
                 synced_mappings[k] = v
 
 
