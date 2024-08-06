@@ -167,16 +167,9 @@ def initialize_logger(settings):
 
 def is_domain_excluded(logger, name, dom: DomainsModel):
     for sub_dom in dom.excluded_sub_domains:
-        fqdn_with_sub_dom = sub_dom + "." + dom.name
-
-        if name.find(fqdn_with_sub_dom) != -1:
-            logger.info(
-                "Ignoring %s because it falls until excluded sub domain: %s",
-                name,
-                sub_dom,
-            )
+        if f"{sub_dom}.{dom.name}" in name:
+            logger.info(f"Ignoring {name} because it falls until excluded sub domain: {sub_dom}")
             return True
-
     return False
 
 
@@ -336,7 +329,9 @@ def check_container_t2(c, settings):
     return mappings
 
 
-def check_traefik(settings, included_hosts, excluded_hosts):
+def check_traefik(
+    settings, included_hosts: list[re.Pattern], excluded_hosts: list[re.Pattern], logger
+):
     mappings = {}
     logger.debug("Called check_traefik poller")
     r = requests.get("{}/api/http/routers".format(settings.traefik_poll_url))
@@ -401,7 +396,9 @@ def check_traefik(settings, included_hosts, excluded_hosts):
     return mappings
 
 
-def check_traefik_and_sync_mappings(cf, settings, included_hosts, excluded_hosts, domain_infos):
+def check_traefik_and_sync_mappings(
+    cf, settings, included_hosts, excluded_hosts, domain_infos, logger
+):
     """
     Checks Traefik for mappings and syncs them with the domain information.
 
@@ -411,7 +408,7 @@ def check_traefik_and_sync_mappings(cf, settings, included_hosts, excluded_hosts
         domain_infos (dict): Domain information for synchronization.
     """
     # Extract mappings from Traefik
-    traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts)
+    traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts, logger)
     # Sync the extracted mappings with the domain information
     sync_mappings(cf, settings, traefik_mappings, domain_infos)
 
@@ -448,7 +445,7 @@ def sync_mappings(cf, settings, mappings, domain_infos, logger):
                 synced_mappings[k] = v
 
 
-def get_initial_mappings(client, settings, included_hosts, excluded_hosts):
+def get_initial_mappings(client, settings: Settings, included_hosts, excluded_hosts, logger):
     """
     Initializes the mappings by discovering Docker containers and Traefik services.
 
@@ -470,7 +467,7 @@ def get_initial_mappings(client, settings, included_hosts, excluded_hosts):
     if settings.traefik_poll_url:
         logger.debug("Traefik List Discovery Loop")
         # Extract mappings from Traefik
-        traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts)
+        traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts, logger)
         # Add the extracted mappings to the current mappings
         add_to_mappings(mappings, traefik_mappings)
 
@@ -621,6 +618,7 @@ async def main():
                 settings.traefik_included_hosts,
                 settings.traefik_excluded_hosts,
                 settings.domains,
+                logger,
             ),
         )
         polls.append(traefik_poll.start())

@@ -1,6 +1,3 @@
-# test_cloudflare_companion.py
-
-
 import logging
 from unittest.mock import MagicMock, patch
 
@@ -129,9 +126,7 @@ def test_point_domain_rate_limit_retry(
     assert mock_cloudflare.zones.dns_records.get.call_count == 3
 
 
-def test_point_domain_dry_run(
-    mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
-):
+def test_point_domain_dry_run(mock_cloudflare, mock_settings, mock_domain_infos, mock_logger):
     mock_settings.dry_run = True
     mock_cloudflare.zones.dns_records.get.return_value = []
     result = CloudFlareZones.point_domain(
