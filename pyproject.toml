@@ -28,3 +28,6 @@ virtual = true
 pythonpath = [
     "src",
 ]
+
+[tool.ruff]
+line-length = 100

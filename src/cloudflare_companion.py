@@ -23,7 +23,7 @@ import requests
 from _settings import _EnvSettingsSource
 from pydantic import BaseModel, ValidationError, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
-from typing_extensions import Self
+from typing_extensions import Self, deprecated
 
 EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value
 EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars
@@ -211,106 +211,78 @@ class CloudFlareZones:
         self.settings = settings
         self.logger = logger
 
-    async def get(self, zone_id: str, name: str):
+    async def get_records(self, zone_id: str, name: str):
         for retry in range(self.config["max_retries"]):
             try:
                 return self.client.zones.dns_records.get(zone_id, params={"name": name})
-            except CloudFlare.exceptions.CloudFlareAPIError as e:
-                if "Rate limited" in str(e):
-                    sleep_time = 2 ** (retry + 1)
-                    asyncio.sleep(sleep_time)  # Exponential backoff
-                else:
-                    raise e
+            except CloudFlare.exceptions.CloudFlareAPIError as err:
+                if "Rate limited" not in str(err):
+                    raise err
+                # Exponential backoff
+                sleep_time = 2 ** (retry + 1)
+                self.logger.warning(f"Max Rate limit reached. Retry in {sleep_time} seconds...")
+                asyncio.sleep(sleep_time)
         raise CloudFlareException("Max retries exceeded")
 
+    def post_record(self, zone_id, data):
+        if self.settings.dry_run:
+            self.logger.info(f"DRY-RUN: POST to Cloudflare {zone_id}:, {data}")
+        else:
+            self.client.zones.dns_records.post(zone_id, data=data)
+            self.logger.info(f"Created new record in zone {zone_id} with data {data}")
+
+    def put_record(self, zone_id, record_id, data):
+        if self.settings.dry_run:
+            self.logger.info(f"DRY-RUN: PUT to Cloudflare {zone_id}, {record_id}:, {data}")
+        else:
+            self.client.zones.dns_records.put(zone_id, record_id, data=data)
+            self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
+
     # Start Program to update the Cloudflare
-    @staticmethod
-    def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
+    async def update_zones(self, name, domain_infos: list[DomainsModel]):
         ok = True
         for domain_info in domain_infos:
+            # Don't update the domain if it's the same as the target domain, which sould be used on tunnel
             if name == domain_info.target_domain:
                 continue
-
-            if name.find(domain_info.name) >= 0:
-                if is_domain_excluded(logger, name, domain_info):
-                    continue
-
-                records = asyncio.run(
-                    CloudFlareZones(cf, settings, logger).get(domain_info.zone_id, name)
-                )
-                if records is None:
-                    ok = False
-                    continue
-
-                data = {
-                    "type": settings.rc_type,
-                    "name": name,
-                    "content": domain_info.target_domain,
-                    "ttl": int(domain_info.ttl),
-                    "proxied": domain_info.proxied,
-                    "comment": domain_info.comment,
-                }
-                if settings.refresh_entries:
-                    try:
-                        if len(records) == 0:
-                            if settings.dry_run:
-                                logger.info(
-                                    "DRY-RUN: POST to Cloudflare %s:, %s",
-                                    domain_info.zone_id,
-                                    data,
-                                )
-                            else:
-                                _ = cf.zones.dns_records.post(
-                                    domain_info.zone_id, data=data
-                                )
-                            logger.info(
-                                "Created new record: %s to point to %s",
-                                name,
-                                domain_info.target_domain,
-                            )
-                        else:
-                            for record in records:
-                                if settings.dry_run:
-                                    logger.info(
-                                        "DRY-RUN: PUT to Cloudflare %s, %s:, %s",
-                                        domain_info.zone_id,
-                                        record["id"],
-                                        data,
-                                    )
-                                else:
-                                    cf.zones.dns_records.put(
-                                        domain_info.zone_id, record["id"], data=data
-                                    )
-                                logger.info(
-                                    "Updated existing record: %s to point to %s",
-                                    name,
-                                    domain_info.target_domain,
-                                )
-                    except CloudFlare.exceptions.CloudFlareAPIError as ex:
-                        logger.error("** %s - %d %s" % (name, ex, ex))
-                        ok = False
-                        pass
+            # Skip if it's not a subdomain of the domain we're looking for
+            if name.find(domain_info.name) < 0:
+                continue
+            # Skip if the domain is exclude list
+            if is_domain_excluded(self.logger, name, domain_info):
+                continue
+            # Fetch the records for the domain, if any
+            if (records := await self.get_records(domain_info.zone_id, name)) is None:
+                ok = False
+                continue
+            # Prepare data for the new record
+            data = {
+                "type": self.settings.rc_type,
+                "name": name,
+                "content": domain_info.target_domain,
+                "ttl": int(domain_info.ttl),
+                "proxied": domain_info.proxied,
+                "comment": domain_info.comment,
+            }
+            try:
+                # Update the record if it already exists
+                if self.settings.refresh_entries and len(records) > 0:
+                    for record in records:
+                        self.put_record(domain_info.zone_id, record["id"], data)
+                # Create a new record if it doesn't exist yet
                 else:
-                    try:
-                        if settings.dry_run:
-                            logger.info(
-                                "DRY-RUN: POST to Cloudflare %s:, %s",
-                                domain_info.zone_id,
-                                data,
-                            )
-                        else:
-                            _ = cf.zones.dns_records.post(
-                                domain_info.zone_id, data=data
-                            )
-                        logger.info(
-                            "Created new record: %s to point to %s",
-                            name,
-                            domain_info.target_domain,
-                        )
-                    except CloudFlare.exceptions.CloudFlareAPIError as ex:
-                        logger.error("** %s - %d %s" % (name, ex, ex))
-                        ok = False
+                    self.post_record(domain_info.zone_id, data)
+            except CloudFlare.exceptions.CloudFlareAPIError as ex:
+                self.logger.error("** %s - %d %s" % (name, ex, ex))
+                ok = False
         return ok
+
+    # Start Program to update the Cloudflare
+    @deprecated("Use update_zones instead")
+    @staticmethod
+    def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
+        client = CloudFlareZones(cf, settings, logger)
+        return asyncio.run(client.update_zones(name, domain_infos))
 
 
 def check_container_t2(c, settings):
@@ -375,12 +347,8 @@ def check_traefik(settings, included_hosts, excluded_hosts):
                     name = router["name"]
                     value = router["rule"]
                     if "Host" in value:
-                        logger.debug(
-                            "Traefik Router Name: %s rule value: %s", name, value
-                        )
-                        extracted_domains = re.findall(
-                            r"Host\(\`([a-zA-Z0-9\.\-]+)\`\)", value
-                        )
+                        logger.debug("Traefik Router Name: %s rule value: %s", name, value)
+                        extracted_domains = re.findall(r"Host\(\`([a-zA-Z0-9\.\-]+)\`\)", value)
                         logger.debug(
                             "Traefik Router Name: %s extracted domains from rule: %s",
                             name,
@@ -433,9 +401,7 @@ def check_traefik(settings, included_hosts, excluded_hosts):
     return mappings
 
 
-def check_traefik_and_sync_mappings(
-    cf, settings, included_hosts, excluded_hosts, domain_infos
-):
+def check_traefik_and_sync_mappings(cf, settings, included_hosts, excluded_hosts, domain_infos):
     """
     Checks Traefik for mappings and syncs them with the domain information.
 
@@ -551,9 +517,7 @@ def init_cloudflare_agent(logger: logging.Logger, settings: Settings):
         cf = CloudFlare.CloudFlare(debug=cf_debug, token=settings.cf_token)
     else:
         logger.debug("API Mode: Global")
-        cf = CloudFlare.CloudFlare(
-            debug=cf_debug, email=settings.cf_email, token=settings.cf_token
-        )
+        cf = CloudFlare.CloudFlare(debug=cf_debug, email=settings.cf_email, token=settings.cf_token)
     return cf
 
 
@@ -590,9 +554,7 @@ async def watch_events(dk_agent, cf_agent, settings):
         for event in events:
             if event.get("status") == "start":
                 try:
-                    container = await asyncio.to_thread(
-                        dk_agent.containers.get, event.get("id")
-                    )
+                    container = await asyncio.to_thread(dk_agent.containers.get, event.get("id"))
                     add_to_mappings(
                         new_mappings,
                         check_container_t2(container, settings),
