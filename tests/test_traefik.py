@@ -19,8 +19,11 @@ def mock_logger():
 def mock_settings():
     settings = MagicMock(spec=Settings)
     settings.traefik_poll_url = "http://mock-traefik/api"
+    settings.traefik_poll_seconds = 2
     settings.traefik_filter = None
     settings.traefik_filter_label = None
+    settings.traefik_included_hosts = [re.compile(".*")]
+    settings.traefik_excluded_hosts = []
     return settings
 
 

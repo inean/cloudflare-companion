@@ -7,7 +7,10 @@ import logging
 import os
 import re
 import sys
+import time
+from asyncio import Queue
 from datetime import datetime
+from enum import Enum
 from typing import Literal, TypedDict
 from urllib.parse import urlparse
 
@@ -173,13 +176,6 @@ def is_domain_excluded(logger, name, dom: DomainsModel):
     return False
 
 
-def is_matching(host, regexes):
-    for regex in regexes:
-        if regex.search(host):
-            return True
-    return False
-
-
 class CloudFlareConfig(TypedDict, total=False):
     max_retries: int
     """Max number of retries to attempt before exponential backoff fails"""
@@ -278,139 +274,195 @@ class CloudFlareZones:
         return asyncio.run(client.update_zones(name, domain_infos))
 
 
-def check_container_t2(c, settings):
-    def label_host():
-        for prop in c.attrs.get("Config").get("Labels"):
-            value = c.attrs.get("Config").get("Labels").get(prop)
-            if re.match(r"traefik.*?\.rule", prop):
-                if "Host" in value:
-                    logger.debug("Container ID: %s rule value: %s", cont_id, value)
-                    extracted_domains = re.findall(r"\`([a-zA-Z0-9\.\-]+)\`", value)
-                    logger.debug(
-                        "Container ID: %s extracted domains from rule: %s",
-                        cont_id,
-                        extracted_domains,
+class PollerSource(Enum):
+    MANUAL = "manual"
+    DOCKER = "docker"
+    TRAEFIK = "traefik"
+
+
+class TraefikPoller:
+    def __init__(self, settings, logger, *, client: requests.Session | None = None):
+        # Set up the client and logger
+        self.client = client or requests.Session()
+        self.logger = logger
+
+        # Extract the included and excluded hosts
+        self.included_hosts = settings.traefik_included_hosts
+        self.excluded_hosts = settings.traefik_excluded_hosts
+
+        # Computed from settings
+        self.poll_sec = settings.traefik_poll_seconds
+        self.poll_url = f"{settings.traefik_poll_url}/api/http/routers"
+
+    def is_validate_route(self, route):
+        required_keys = ["status", "name", "rule"]
+        if any(key not in route for key in required_keys):
+            self.logger.debug(f"Traefik Router Name: {route} - Missing Key")
+            return False
+        if route["status"] != "enabled":
+            self.logger.debug(f"Traefik Router Name: {route['name']} - Not Enabled")
+            return False
+        if "Host" not in route["rule"]:
+            self.logger.debug(f"Traefik Router Name: {route['name']} - Missing Host")
+        # Route is valid and enabled
+        return True
+
+    def is_validate_host(self, host):
+        if not any(pattern.match(host) for pattern in self.included_hosts):
+            self.logger.debug(f"Traefik Router Host: {host} - Not Match with Include Hosts")
+            return False
+        if any(pattern.match(host) for pattern in self.excluded_hosts):
+            self.logger.debug(f"Traefik Router Host: {host} - Match with Exclude Hosts")
+            return False
+        # Host is intended to be synced
+        return True
+
+    async def poll(self):
+        while True:
+            self.logger.debug("Fetching routers from Traefik API")
+            try:
+                response = self.client.get(self.poll_url, self.poll_sec)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Failed to fetch routers from Traefik API: {e}")
+                response = None
+            # Return a collection of routes
+            yield [] if response is None else response.json()
+            await asyncio.sleep(self.poll_sec)
+
+    async def run(self):
+        self.logger.info("Starting Traefik Poller")
+        while True:
+            self.logger.debug("Called check_traefik poller")
+            async for route in self.poll():
+                # Check if route is whell formed
+                if not self.is_validate_route(route):
+                    continue
+                # Extract the domains from the rule
+                hosts = re.findall(r"Host\(`([^`]+)`\)", route["rule"])
+                self.logger.debug(f"Traefik Router Name: {route['name']} domains: {hosts}")
+                # Validate domain and queue for sync
+                for host in (host for host in hosts if self.is_validate_host(host)):
+                    self.logger.info(f"Found Traefik Router: {route['name']} with Hostname {host}")
+                    await SyncManager().put([host], PollerSource.TRAEFIK)
+
+    @deprecated("Use run instead")
+    def check_traefik(self):
+        def is_matching(host, patterns):
+            return any(pattern.match(host) for pattern in patterns)
+
+        mappings = {}
+        self.logger.debug("Called check_traefik poller")
+        response = requests.get(self.poll_url)
+
+        if response is not None and response.ok:
+            for router in response.json():
+                if any(key not in router for key in ["status", "name", "rule"]):
+                    self.logger.debug(f"Traefik Router Name: {router} - Missing Key")
+                    continue
+                if router["status"] != "enabled" or "Host" not in router["rule"]:
+                    self.logger.debug(
+                        f"Traefik Router Name: {router['name']} - Not Enabled or Missing Host"
                     )
-                    if len(extracted_domains) > 1:
-                        for v in extracted_domains:
-                            logger.info(
-                                "Found Service ID: %s with Multi-Hostname %s",
-                                cont_id,
-                                v,
-                            )
-                            mappings[v] = 1
-                    elif len(extracted_domains) == 1:
-                        logger.info(
-                            "Found Service ID: %s with Hostname %s",
-                            cont_id,
-                            extracted_domains[0],
+                    continue
+
+                # Extract the domains from the rule
+                name, value = router["name"], router["rule"]
+                self.logger.debug(f"Traefik Router Name: {name} rule value: {value}")
+
+                # Extract the domains from the rule
+                extracted_domains = re.findall(r"Host\(`([^`]+)`\)", value)
+                self.logger.debug(f"Traefik Router Name: {name} domains: {extracted_domains}")
+
+                for v in extracted_domains:
+                    if not is_matching(v, self.included_hosts):
+                        self.logger.debug(
+                            f"Traefik Router Name: {name} with Host {v}: Not Match Include"
                         )
-                        mappings[extracted_domains[0]] = 1
-                else:
-                    pass
+                        continue
+                    if is_matching(v, self.excluded_hosts):
+                        self.logger.debug(
+                            f"Traefik Router Name: {name} with Host {v} - Match exclude"
+                        )
+                        continue
+                    # Matched
+                    self.logger.info(f"Found Traefik Router Name: {name} with Hostname {v}")
+                    mappings[v] = 2
 
-    mappings = {}
-    logger.debug("Called check_container_t2 for: %s", c)
-    cont_id = c.attrs.get("Id")
-    try:
-        settings.traefik_filter
-    except NameError:
-        label_host()
-    else:
-        for filter_label in c.attrs.get("Config").get("Labels"):
-            filter_value = c.attrs.get("Config").get("Labels").get(filter_label)
-            if re.match(settings.traefik_filter_label, filter_label) and re.match(
-                settings.traefik_filter, filter_value
-            ):
-                logger.debug(
-                    f"Found Container ID {cont_id} with matching label {filter_label} with value {filter_value}"
-                )
-                label_host()
-    return mappings
+        return mappings
+
+    @deprecated("Use run instead")
+    def check_traefik_and_sync_mappings(self, cf, domain_infos):
+        """
+        Checks Traefik for mappings and syncs them with the domain information.
+
+        Args:
+            included_hosts (list): List of hosts to include.
+            excluded_hosts (list): List of hosts to exclude.
+            domain_infos (dict): Domain information for synchronization.
+        """
+        # Extract mappings from Traefik
+        traefik_mappings = self.check_traefik()
+        # Sync the extracted mappings with the domain information
+        sync_mappings(cf, self.settings, traefik_mappings, domain_infos)
 
 
+@deprecated("Use TraefikPoller instead")
 def check_traefik(
     settings, included_hosts: list[re.Pattern], excluded_hosts: list[re.Pattern], logger
 ):
-    mappings = {}
-    logger.debug("Called check_traefik poller")
-    r = requests.get("{}/api/http/routers".format(settings.traefik_poll_url))
-    if r.ok:
-        for router in r.json():
-            if "status" in router and router["status"] == "enabled":
-                if "name" in router and "rule" in router:
-                    name = router["name"]
-                    value = router["rule"]
-                    if "Host" in value:
-                        logger.debug("Traefik Router Name: %s rule value: %s", name, value)
-                        extracted_domains = re.findall(r"Host\(\`([a-zA-Z0-9\.\-]+)\`\)", value)
-                        logger.debug(
-                            "Traefik Router Name: %s extracted domains from rule: %s",
-                            name,
-                            extracted_domains,
-                        )
-                        if len(extracted_domains) > 1:
-                            for v in extracted_domains:
-                                if is_matching(v, included_hosts):
-                                    if is_matching(v, excluded_hosts):
-                                        logger.debug(
-                                            "Traefik Router Name: %s with Multi-Hostname %s - Matched Exclude",
-                                            name,
-                                            v,
-                                        )
-                                    else:
-                                        logger.info(
-                                            "Found Traefik Router Name: %s with Multi-Hostname %s",
-                                            name,
-                                            v,
-                                        )
-                                        mappings[v] = 2
-                                else:
-                                    logger.debug(
-                                        "Traefik Router Name: %s with Multi-Hostname %s: Not Match Include",
-                                        name,
-                                        v,
-                                    )
-                        elif len(extracted_domains) == 1:
-                            if is_matching(extracted_domains[0], included_hosts):
-                                if is_matching(extracted_domains[0], excluded_hosts):
-                                    logger.debug(
-                                        "Traefik Router Name: %s with Hostname %s - Matched Exclude",
-                                        name,
-                                        extracted_domains[0],
-                                    )
-                                else:
-                                    logger.info(
-                                        "Found Traefik Router Name: %s with Hostname %s",
-                                        name,
-                                        extracted_domains[0],
-                                    )
-                                    mappings[extracted_domains[0]] = 2
-                            else:
-                                logger.debug(
-                                    "Traefik Router Name: %s with Hostname %s: Not Match Include",
-                                    name,
-                                    extracted_domains[0],
-                                )
-
-    return mappings
+    settings.traefik_included_hosts = included_hosts
+    settings.traefik_excluded_hosts = excluded_hosts
+    poller = TraefikPoller(settings, logger)
+    return poller.check_traefik()
 
 
+@deprecated("Use TraefikPoller instead")
 def check_traefik_and_sync_mappings(
     cf, settings, included_hosts, excluded_hosts, domain_infos, logger
 ):
-    """
-    Checks Traefik for mappings and syncs them with the domain information.
+    settings.traefik_included_hosts = included_hosts
+    settings.traefik_excluded_hosts = excluded_hosts
+    poller = TraefikPoller(settings, logger)
+    poller.check_traefik_and_sync_mappings(cf, included_hosts, excluded_hosts, domain_infos)
 
-    Args:
-        included_hosts (list): List of hosts to include.
-        excluded_hosts (list): List of hosts to exclude.
-        domain_infos (dict): Domain information for synchronization.
-    """
-    # Extract mappings from Traefik
-    traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts, logger)
-    # Sync the extracted mappings with the domain information
-    sync_mappings(cf, settings, traefik_mappings, domain_infos)
+
+class ZoneUpdateJob(TypedDict, total=False):
+    timestamp: int
+    """Timestamp of the job. Use time.monotonic_ns()"""
+
+    source: PollerSource
+    """Poller that provide the job"""
+
+    entries: list[str]
+    """List of entries to update"""
+
+
+class Singleton(type):
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
+class SyncManager(metaclass=Singleton):
+    def __init__(self, queue: Queue | None = None):
+        self.queue = queue or Queue(max_size=len(PollerSource))
+        self.entries = {}
+
+    async def put(self, entries: list[str], source: PollerSource):
+        await self.queue.put(
+            ZoneUpdateJob(
+                timestamp=time.monotonic_ns(),
+                source=source,
+                entries=entries,
+            )
+        )
+
+
+synced_mappings = {}
 
 
 def add_to_mappings(current_mappings, mappings):
@@ -425,9 +477,6 @@ def add_to_mappings(current_mappings, mappings):
         current_mapping = current_mappings.get(k)
         if current_mapping is None or current_mapping > v:
             current_mappings[k] = v
-
-
-synced_mappings = {}
 
 
 def sync_mappings(cf, settings, mappings, domain_infos, logger):
@@ -529,6 +578,57 @@ def init_docker_agent(logger: logging.Logger, settings: Settings):
 
     logger.debug("Connected to Docker")
     return client
+
+
+def check_container_t2(c, settings):
+    def label_host():
+        for prop in c.attrs.get("Config").get("Labels"):
+            value = c.attrs.get("Config").get("Labels").get(prop)
+            if re.match(r"traefik.*?\.rule", prop):
+                if "Host" in value:
+                    logger.debug("Container ID: %s rule value: %s", cont_id, value)
+                    extracted_domains = re.findall(r"\`([a-zA-Z0-9\.\-]+)\`", value)
+                    logger.debug(
+                        "Container ID: %s extracted domains from rule: %s",
+                        cont_id,
+                        extracted_domains,
+                    )
+                    if len(extracted_domains) > 1:
+                        for v in extracted_domains:
+                            logger.info(
+                                "Found Service ID: %s with Multi-Hostname %s",
+                                cont_id,
+                                v,
+                            )
+                            mappings[v] = 1
+                    elif len(extracted_domains) == 1:
+                        logger.info(
+                            "Found Service ID: %s with Hostname %s",
+                            cont_id,
+                            extracted_domains[0],
+                        )
+                        mappings[extracted_domains[0]] = 1
+                else:
+                    pass
+
+    mappings = {}
+    logger.debug("Called check_container_t2 for: %s", c)
+    cont_id = c.attrs.get("Id")
+    try:
+        settings.traefik_filter
+    except NameError:
+        label_host()
+    else:
+        for filter_label in c.attrs.get("Config").get("Labels"):
+            filter_value = c.attrs.get("Config").get("Labels").get(filter_label)
+            if re.match(settings.traefik_filter_label, filter_label) and re.match(
+                settings.traefik_filter, filter_value
+            ):
+                logger.debug(
+                    f"Found Container ID {cont_id} with matching label {filter_label} with value {filter_value}"
+                )
+                label_host()
+    return mappings
 
 
 async def watch_events(dk_agent, cf_agent, settings):
