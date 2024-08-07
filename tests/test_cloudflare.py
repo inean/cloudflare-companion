@@ -7,6 +7,7 @@ from cloudflare_companion import (
     CloudFlareZones,
     DomainsModel,
     Settings,
+    Singleton,
 )
 
 
@@ -47,66 +48,58 @@ def mock_domain_infos():
     return [domain_info]
 
 
-def test_point_domain_target_domain_match(
+@pytest.fixture(scope="module", autouse=True)
+def patch_singleton():
+    side_effect = super(Singleton, CloudFlareZones).__call__
+    with patch.object(Singleton, "__call__", side_effect=side_effect):
+        yield
+
+
+@pytest.mark.asyncio
+async def test_update_zones_target_domain_match(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
-    result = CloudFlareZones.point_domain(
-        mock_cloudflare,
-        mock_settings,
-        "target.example.com",
-        mock_domain_infos,
-        mock_logger,
-    )
+    cf_zones = CloudFlareZones(mock_settings, mock_logger, client=mock_cloudflare)
+    result = await cf_zones.update_zones("target.example.com", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.get.assert_not_called()
 
 
-def test_point_domain_excluded_domain(
+@pytest.mark.asyncio
+async def test_update_zones_excluded_domain(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_domain_infos[0].excluded_sub_domains = ["sub"]
-    result = CloudFlareZones.point_domain(
-        mock_cloudflare,
-        mock_settings,
-        "sub.example.com",
-        mock_domain_infos,
-        mock_logger,
-    )
+    cf_zones = CloudFlareZones(mock_settings, mock_logger, client=mock_cloudflare)
+    result = await cf_zones.update_zones("sub.example.com", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.get.assert_not_called()
 
 
-def test_point_domain_create_new_record(
+@pytest.mark.asyncio
+async def test_update_zones_create_new_record(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_cloudflare.zones.dns_records.get.return_value = []
-    result = CloudFlareZones.point_domain(
-        mock_cloudflare,
-        mock_settings,
-        "new.example.com",
-        mock_domain_infos,
-        mock_logger,
-    )
+    cf_zones = CloudFlareZones(mock_settings, mock_logger, client=mock_cloudflare)
+    result = await cf_zones.update_zones("new.example.com", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.post.assert_called_once()
 
 
-def test_point_domain_update_existing_record(
+@pytest.mark.asyncio
+async def test_update_zones_update_existing_record(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_cloudflare.zones.dns_records.get.return_value = [{"id": "record_id"}]
-    result = CloudFlareZones.point_domain(
-        mock_cloudflare,
-        mock_settings,
-        "existing.example.com",
-        mock_domain_infos,
-        mock_logger,
-    )
+    cf_zones = CloudFlareZones(mock_settings, mock_logger, client=mock_cloudflare)
+    result = await cf_zones.update_zones("existing.example.com", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.put.assert_called_once()
 
 
-def test_point_domain_rate_limit_retry(
+@pytest.mark.asyncio
+async def test_update_zones_rate_limit_retry(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     mock_cloudflare.zones.dns_records.get.side_effect = [
@@ -114,27 +107,18 @@ def test_point_domain_rate_limit_retry(
         CloudFlare.exceptions.CloudFlareAPIError(-1, "Rate limited"),
         [],
     ]
-    with patch("time.sleep", return_value=None):
-        result = CloudFlareZones.point_domain(
-            mock_cloudflare,
-            mock_settings,
-            "rate_limited.example.com",
-            mock_domain_infos,
-            mock_logger,
-        )
+    cf_zones = CloudFlareZones(mock_settings, mock_logger, client=mock_cloudflare)
+    with patch("asyncio.sleep", return_value=None):
+        result = await cf_zones.update_zones("rate_limited.example.com", mock_domain_infos)
     assert result is True
     assert mock_cloudflare.zones.dns_records.get.call_count == 3
 
 
-def test_point_domain_dry_run(mock_cloudflare, mock_settings, mock_domain_infos, mock_logger):
+@pytest.mark.asyncio
+async def test_update_zones_dry_run(mock_cloudflare, mock_settings, mock_domain_infos, mock_logger):
     mock_settings.dry_run = True
     mock_cloudflare.zones.dns_records.get.return_value = []
-    result = CloudFlareZones.point_domain(
-        mock_cloudflare,
-        mock_settings,
-        "dryrun.example.com",
-        mock_domain_infos,
-        mock_logger,
-    )
+    cf_zones = CloudFlareZones(mock_settings, mock_logger, client=mock_cloudflare)
+    result = await cf_zones.update_zones("dryrun.example.com", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.post.assert_not_called()

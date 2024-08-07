@@ -8,13 +8,14 @@ import os
 import re
 import sys
 import time
+from abc import ABC, abstractmethod
 from asyncio import Queue
 from datetime import datetime
 from enum import Enum
-from typing import Literal, TypedDict
+from logging import Logger
+from typing import Any, TypedDict
 from urllib.parse import urlparse
 
-import CloudFlare
 import docker
 import docker.errors
 import requests
@@ -24,9 +25,11 @@ import requests
 # -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
 #
 from _settings import _EnvSettingsSource
+from CloudFlare import CloudFlare
+from CloudFlare import exceptions as CloudFlareExceptions
 from pydantic import BaseModel, ValidationError, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
-from typing_extensions import Self, deprecated
+from typing_extensions import Self, deprecated, override
 
 EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value
 EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars
@@ -86,9 +89,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_type: str = "BOTH"
 
-    # Source Settings
-    source: Literal["docker", "podman"] = "docker"
+    # Docker Settings
     enable_docker_poll: bool = True
+    docker_poll_seconds: int = 5
 
     # Traefik Settings
     enable_traefik_poll: bool = False
@@ -176,6 +179,15 @@ def is_domain_excluded(logger, name, dom: DomainsModel):
     return False
 
 
+class Singleton(type):
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(cls, *args, **kwargs)
+        return cls._instances[cls]
+
+
 class CloudFlareConfig(TypedDict, total=False):
     max_retries: int
     """Max number of retries to attempt before exponential backoff fails"""
@@ -185,26 +197,35 @@ class CloudFlareException(Exception):
     pass
 
 
-class CloudFlareZones:
+class CloudFlareZones(metaclass=Singleton):
     config: CloudFlareConfig = {
         "max_retries": 5,
     }
 
-    def __init__(
-        self,
-        client: CloudFlare.CloudFlare,
-        settings: Settings,
-        logger: logging.Logger,
-    ):
+    def __init__(self, settings: Settings, logger: Logger, *, client: CloudFlare | None = None):
+        if client is None:
+            assert settings.cf_token is not None
+            client = CloudFlare(
+                email=settings.cf_email,
+                token=settings.cf_token,
+                debug=settings.log_level.upper() == "VERBOSE",
+            )
+            logger.debugf(f"API Mode: {'Scoped' if not settings.cf_email else 'Global'}")
+
+        # Set up the client and logger
         self.client = client
-        self.settings = settings
         self.logger = logger
+
+        # Extract required settings
+        self.dry_run = settings.dry_run
+        self.rc_type = settings.rc_type
+        self.refresh_entries = settings.refresh_entries
 
     async def get_records(self, zone_id: str, name: str):
         for retry in range(self.config["max_retries"]):
             try:
                 return self.client.zones.dns_records.get(zone_id, params={"name": name})
-            except CloudFlare.exceptions.CloudFlareAPIError as err:
+            except CloudFlareExceptions.CloudFlareAPIError as err:
                 if "Rate limited" not in str(err):
                     raise err
                 # Exponential backoff
@@ -214,14 +235,14 @@ class CloudFlareZones:
         raise CloudFlareException("Max retries exceeded")
 
     def post_record(self, zone_id, data):
-        if self.settings.dry_run:
+        if self.dry_run:
             self.logger.info(f"DRY-RUN: POST to Cloudflare {zone_id}:, {data}")
         else:
             self.client.zones.dns_records.post(zone_id, data=data)
             self.logger.info(f"Created new record in zone {zone_id} with data {data}")
 
     def put_record(self, zone_id, record_id, data):
-        if self.settings.dry_run:
+        if self.dry_run:
             self.logger.info(f"DRY-RUN: PUT to Cloudflare {zone_id}, {record_id}:, {data}")
         else:
             self.client.zones.dns_records.put(zone_id, record_id, data=data)
@@ -246,7 +267,7 @@ class CloudFlareZones:
                 continue
             # Prepare data for the new record
             data = {
-                "type": self.settings.rc_type,
+                "type": self.rc_type,
                 "name": name,
                 "content": domain_info.target_domain,
                 "ttl": int(domain_info.ttl),
@@ -255,7 +276,7 @@ class CloudFlareZones:
             }
             try:
                 # Update the record if it already exists
-                if self.settings.refresh_entries and len(records) > 0:
+                if self.refresh_entries and len(records) > 0:
                     for record in records:
                         self.put_record(domain_info.zone_id, record["id"], data)
                 # Create a new record if it doesn't exist yet
@@ -269,8 +290,8 @@ class CloudFlareZones:
     # Start Program to update the Cloudflare
     @deprecated("Use update_zones instead")
     @staticmethod
-    def point_domain(cf, settings, name, domain_infos: list[DomainsModel], logger):
-        client = CloudFlareZones(cf, settings, logger)
+    def point_domain(settings, name, domain_infos: list[DomainsModel], logger):
+        client = CloudFlareZones(settings, logger)
         return asyncio.run(client.update_zones(name, domain_infos))
 
 
@@ -280,15 +301,25 @@ class PollerSource(Enum):
     TRAEFIK = "traefik"
 
 
-class TraefikPoller:
-    def __init__(self, settings, logger, *, client: requests.Session | None = None):
+class Poller(ABC):
+    def __init__(self, settings, logger, client: Any):
         # Set up the client and logger
-        self.client = client or requests.Session()
         self.logger = logger
-
+        self.client = client
         # Extract the included and excluded hosts
         self.included_hosts = settings.traefik_included_hosts
         self.excluded_hosts = settings.traefik_excluded_hosts
+
+    @abstractmethod
+    async def poll(self): ...
+
+    @abstractmethod
+    async def run(self): ...
+
+
+class TraefikPoller(Poller):
+    def __init__(self, settings, logger, *, client: requests.Session | None = None):
+        super(TraefikPoller, self).__init__(settings, logger, client or requests.Session())
 
         # Computed from settings
         self.poll_sec = settings.traefik_poll_seconds
@@ -317,6 +348,7 @@ class TraefikPoller:
         # Host is intended to be synced
         return True
 
+    @override
     async def poll(self):
         while True:
             self.logger.debug("Fetching routers from Traefik API")
@@ -330,6 +362,7 @@ class TraefikPoller:
             yield [] if response is None else response.json()
             await asyncio.sleep(self.poll_sec)
 
+    @override
     async def run(self):
         self.logger.info("Starting Traefik Poller")
         while True:
@@ -392,7 +425,7 @@ class TraefikPoller:
         return mappings
 
     @deprecated("Use run instead")
-    def check_traefik_and_sync_mappings(self, cf, domain_infos):
+    def check_traefik_and_sync_mappings(self, domain_infos):
         """
         Checks Traefik for mappings and syncs them with the domain information.
 
@@ -404,7 +437,7 @@ class TraefikPoller:
         # Extract mappings from Traefik
         traefik_mappings = self.check_traefik()
         # Sync the extracted mappings with the domain information
-        sync_mappings(cf, self.settings, traefik_mappings, domain_infos)
+        sync_mappings(self.settings, traefik_mappings, domain_infos)
 
 
 @deprecated("Use TraefikPoller instead")
@@ -418,13 +451,11 @@ def check_traefik(
 
 
 @deprecated("Use TraefikPoller instead")
-def check_traefik_and_sync_mappings(
-    cf, settings, included_hosts, excluded_hosts, domain_infos, logger
-):
+def check_traefik_and_sync_mappings(settings, included_hosts, excluded_hosts, domain_infos, logger):
     settings.traefik_included_hosts = included_hosts
     settings.traefik_excluded_hosts = excluded_hosts
     poller = TraefikPoller(settings, logger)
-    poller.check_traefik_and_sync_mappings(cf, included_hosts, excluded_hosts, domain_infos)
+    poller.check_traefik_and_sync_mappings(included_hosts, excluded_hosts, domain_infos)
 
 
 class ZoneUpdateJob(TypedDict, total=False):
@@ -436,15 +467,6 @@ class ZoneUpdateJob(TypedDict, total=False):
 
     entries: list[str]
     """List of entries to update"""
-
-
-class Singleton(type):
-    _instances = {}
-
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
-        return cls._instances[cls]
 
 
 class SyncManager(metaclass=Singleton):
@@ -465,6 +487,7 @@ class SyncManager(metaclass=Singleton):
 synced_mappings = {}
 
 
+@deprecated("Use SyncManager instead")
 def add_to_mappings(current_mappings, mappings):
     """
     Adds new mappings to the current mappings if they meet the criteria.
@@ -479,7 +502,8 @@ def add_to_mappings(current_mappings, mappings):
             current_mappings[k] = v
 
 
-def sync_mappings(cf, settings, mappings, domain_infos, logger):
+@deprecated("Use SyncManager instead")
+def sync_mappings(settings, mappings, domain_infos, logger):
     """
     Synchronizes the mappings with the domain information.
 
@@ -490,7 +514,7 @@ def sync_mappings(cf, settings, mappings, domain_infos, logger):
     for k, v in mappings.items():
         current_mapping = synced_mappings.get(k)
         if current_mapping is None or current_mapping > v:
-            if CloudFlareZones.point_domain(cf, settings, k, domain_infos, logger):
+            if CloudFlareZones.point_domain(settings, k, domain_infos, logger):
                 synced_mappings[k] = v
 
 
@@ -555,29 +579,18 @@ def report_current_status_and_settings(logger: logging.Logger, settings: Setting
         logger.debug("Domain Configuration: %s", dom)
 
 
-def init_cloudflare_agent(logger: logging.Logger, settings: Settings):
-    # Init Cloudflare client
-    cf_debug = settings.log_level.upper() == "VERBOSE"
-    if not settings.cf_email:
-        logger.debug("API Mode: Scoped")
-        cf = CloudFlare.CloudFlare(debug=cf_debug, token=settings.cf_token)
-    else:
-        logger.debug("API Mode: Global")
-        cf = CloudFlare.CloudFlare(debug=cf_debug, email=settings.cf_email, token=settings.cf_token)
-    return cf
+class DockerPoller(Poller):
+    def __init__(self, settings: Settings, logger, *, client: docker.DockerClient | None = None):
+        # Init Docker client
+        try:
+            client = client or docker.from_env(timeout=settings.docker_poll_seconds)
+        except docker.errors.DockerException as e:
+            logger.error(f"Could not connect to Docker: {e}")
+            logger.error(f"Known DOCKER_HOST env is '{os.getenv('DOCKER_HOST') or ''}'")
+            sys.exit(1)
 
-
-def init_docker_agent(logger: logging.Logger, settings: Settings):
-    # Init Docker client
-    try:
-        client = docker.from_env()
-    except docker.errors.DockerException as e:
-        logger.error(f"Could not connect to Docker: {e}")
-        logger.error(f"Known DOCKER_HOST env is '{os.getenv('DOCKER_HOST') or ''}'")
-        sys.exit(1)
-
-    logger.debug("Connected to Docker")
-    return client
+        logger.debug("Connected to Docker")
+        super(DockerPoller, self).__init__(settings, logger, client)
 
 
 def check_container_t2(c, settings):
@@ -631,7 +644,7 @@ def check_container_t2(c, settings):
     return mappings
 
 
-async def watch_events(dk_agent, cf_agent, settings):
+async def watch_events(dk_agent, settings):
     t = datetime.now().strftime("%s")
 
     logger.debug("Starting event watch docker events")
@@ -659,7 +672,7 @@ async def watch_events(dk_agent, cf_agent, settings):
                 except docker.errors.NotFound:
                     forever = 778
                     pass
-        sync_mappings(cf_agent, settings, new_mappings, settings.domains, logger)
+        sync_mappings(settings, new_mappings, settings.domains, logger)
         t = t_next
         await asyncio.sleep(5)  # Sleep for 5 seconds before checking for new events
 
@@ -691,10 +704,8 @@ async def main():
     report_current_status_and_settings(logger, settings)
 
     # Init agents
-    cf_agent = init_cloudflare_agent(logger, settings)
-    dk_agent = None
     if settings.enable_docker_poll:
-        dk_agent = init_docker_agent(logger, settings)
+        dk_agent = DockerPoller(settings, logger).client
 
     # Init mappings
     mappings = get_initial_mappings(
@@ -703,7 +714,7 @@ async def main():
         settings.traefik_included_hosts,
         settings.traefik_excluded_hosts,
     )
-    sync_mappings(cf_agent, settings, mappings, settings.domains)
+    sync_mappings(settings, mappings, settings.domains)
 
     # Start traefik polling on a separate thread
     polls = []
@@ -713,7 +724,6 @@ async def main():
             settings.traefik_poll_seconds,
             check_traefik_and_sync_mappings,
             args=(
-                cf_agent,
                 settings,
                 settings.traefik_included_hosts,
                 settings.traefik_excluded_hosts,
@@ -725,7 +735,7 @@ async def main():
 
     # Start docker polleer
     if settings.enable_docker_poll:
-        docker_poll = asyncio.create_task(watch_events(dk_agent, cf_agent, settings))
+        docker_poll = asyncio.create_task(watch_events(dk_agent, settings))
         polls.append(docker_poll)
 
     # Run pollers in parallel
