@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from asyncio import Queue
 from datetime import datetime
 from enum import Enum
+from functools import lru_cache
 from logging import Logger
 from typing import Any, TypedDict
 from urllib.parse import urlparse
@@ -95,7 +96,7 @@ class Settings(BaseSettings):
 
     # Traefik Settings
     enable_traefik_poll: bool = False
-    traefik_filter: str | None = None
+    traefik_filter_value: str | None = None
     traefik_filter_label: str = "traefik.constraint"
     refresh_entries: bool = False
     traefik_poll_seconds: int = 5
@@ -325,7 +326,7 @@ class TraefikPoller(Poller):
         self.poll_sec = settings.traefik_poll_seconds
         self.poll_url = f"{settings.traefik_poll_url}/api/http/routers"
 
-    def is_validate_route(self, route):
+    def is_valid_route(self, route):
         required_keys = ["status", "name", "rule"]
         if any(key not in route for key in required_keys):
             self.logger.debug(f"Traefik Router Name: {route} - Missing Key")
@@ -338,7 +339,7 @@ class TraefikPoller(Poller):
         # Route is valid and enabled
         return True
 
-    def is_validate_host(self, host):
+    def is_valid_host(self, host):
         if not any(pattern.match(host) for pattern in self.included_hosts):
             self.logger.debug(f"Traefik Router Host: {host} - Not Match with Include Hosts")
             return False
@@ -369,13 +370,13 @@ class TraefikPoller(Poller):
             self.logger.debug("Called check_traefik poller")
             async for route in self.poll():
                 # Check if route is whell formed
-                if not self.is_validate_route(route):
+                if not self.is_valid_route(route):
                     continue
                 # Extract the domains from the rule
                 hosts = re.findall(r"Host\(`([^`]+)`\)", route["rule"])
                 self.logger.debug(f"Traefik Router Name: {route['name']} domains: {hosts}")
                 # Validate domain and queue for sync
-                for host in (host for host in hosts if self.is_validate_host(host)):
+                for host in (host for host in hosts if self.is_valid_host(host)):
                     self.logger.info(f"Found Traefik Router: {route['name']} with Hostname {host}")
                     await SyncManager().put([host], PollerSource.TRAEFIK)
 
@@ -579,6 +580,44 @@ def report_current_status_and_settings(logger: logging.Logger, settings: Setting
         logger.debug("Domain Configuration: %s", dom)
 
 
+class DockerContainer:
+    def __init__(self, container: dict, *, logger: logging.Logger):
+        self.container = container
+        self.logger = logger
+
+    @property
+    def id(self) -> str | None:
+        return self.container.attrs.get("Id")
+
+    @property
+    def labels(self) -> dict[str, str]:
+        return self.container.attrs.get("Config", {}).get("Labels", {})
+
+    def __getattr__(self, name: str) -> str | None:
+        return self.labels.get(name)
+
+    @property
+    @lru_cache
+    def hosts(self) -> list[str]:
+        # Try to find traefik filter. If found, tray to parse
+
+        for label, value in self.labels.items():
+            if re.match(r"traefik.*?\.rule", label):
+                self.logger.debug(f"Skipping label {label} from container {self.id}")
+                continue
+            if "Host" not in value:
+                self.logger.debug(f"Skipping container {self.id} - Missing Host")
+                continue
+
+            # Extract the domains from the rule
+            # hosts = re.findall(r"\`([a-zA-Z0-9\.\-]+)\`", value)
+            hosts = re.findall(r"Host\(`([^`]+)`\)", value)
+            self.logger.debug(f"Docker Route Name: {self.id} domains: {hosts}")
+            return [hosts] if isinstance(hosts, str) else hosts
+
+        return []
+
+
 class DockerPoller(Poller):
     def __init__(self, settings: Settings, logger, *, client: docker.DockerClient | None = None):
         # Init Docker client
@@ -592,55 +631,48 @@ class DockerPoller(Poller):
         logger.debug("Connected to Docker")
         super(DockerPoller, self).__init__(settings, logger, client)
 
+        # Computed from settings
+        self.poll_sec = settings.docker_poll_seconds
+        self.filter_label = re.compile(settings.traefik_filter_label)
+        self.filter_value = re.compile(settings.traefik_filter_value)
 
-def check_container_t2(c, settings):
-    def label_host():
-        for prop in c.attrs.get("Config").get("Labels"):
-            value = c.attrs.get("Config").get("Labels").get(prop)
-            if re.match(r"traefik.*?\.rule", prop):
-                if "Host" in value:
-                    logger.debug("Container ID: %s rule value: %s", cont_id, value)
-                    extracted_domains = re.findall(r"\`([a-zA-Z0-9\.\-]+)\`", value)
-                    logger.debug(
-                        "Container ID: %s extracted domains from rule: %s",
-                        cont_id,
-                        extracted_domains,
-                    )
-                    if len(extracted_domains) > 1:
-                        for v in extracted_domains:
-                            logger.info(
-                                "Found Service ID: %s with Multi-Hostname %s",
-                                cont_id,
-                                v,
-                            )
-                            mappings[v] = 1
-                    elif len(extracted_domains) == 1:
-                        logger.info(
-                            "Found Service ID: %s with Hostname %s",
-                            cont_id,
-                            extracted_domains[0],
-                        )
-                        mappings[extracted_domains[0]] = 1
-                else:
-                    pass
+    def is_enabled(self, container: DockerContainer):
+        for label, value in container.labels.items():
+            if self.filter_label.match(label) and self.filter_value.match(value):
+                return True
+        return False
 
+    @override
+    async def poll(self):
+        while True:
+            yield [
+                DockerContainer(container, logger=self.logger)
+                for container in self.client.containers.list()
+            ]
+            await asyncio.sleep(self.poll_sec)
+
+    @override
+    async def run(self):
+        self.logger.info("Starting Docker Poller")
+        while True:
+            self.logger.debug("Called dokcer poller")
+            async for container in self.poll():
+                for cont in container:
+                    raise NotImplementedError("Not implemented")
+            await asyncio.sleep(self.poll_sec)
+
+
+def check_container_t2(containers: list | None, settings, logger):
     mappings = {}
-    logger.debug("Called check_container_t2 for: %s", c)
-    cont_id = c.attrs.get("Id")
-    try:
-        settings.traefik_filter
-    except NameError:
-        label_host()
-    else:
-        for filter_label in c.attrs.get("Config").get("Labels"):
-            filter_value = c.attrs.get("Config").get("Labels").get(filter_label)
-            if re.match(settings.traefik_filter_label, filter_label) and re.match(
-                settings.traefik_filter, filter_value
-            ):
-                logger.debug(
-                    f"Found Container ID {cont_id} with matching label {filter_label} with value {filter_value}"
-                )
-                label_host()
+
+    client = DockerPoller(settings, logger=logger)
+    if containers is None:
+        containers = asyncio.run(anext(client.poll()))
+    for container in containers or []:
+        if client.is_enabled(container):
+            for host in container.hosts:
+                mappings[host] = 1
+
     return mappings
 
 
@@ -667,7 +699,7 @@ async def watch_events(dk_agent, settings):
                     container = await asyncio.to_thread(dk_agent.containers.get, event.get("id"))
                     add_to_mappings(
                         new_mappings,
-                        check_container_t2(container, settings),
+                        check_container_t2(container, settings, logger),
                     )
                 except docker.errors.NotFound:
                     forever = 778
