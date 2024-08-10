@@ -10,3 +10,8 @@ wheels/
 .venv
 .env
 requirements-dev.lock
+
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/

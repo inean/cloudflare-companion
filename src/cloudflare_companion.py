@@ -9,8 +9,9 @@ import re
 import sys
 import time
 from abc import ABC, abstractmethod
-from asyncio import Queue
-from datetime import datetime
+from asyncio import Queue, iscoroutinefunction
+from collections.abc import AsyncGenerator, Callable
+from datetime import datetime, timedelta
 from enum import Enum
 from functools import lru_cache
 from logging import Logger
@@ -303,30 +304,138 @@ class PollerSource(Enum):
 
 
 class Poller(ABC):
-    def __init__(self, settings, logger, client: Any):
-        # Set up the client and logger
+    def __init__(self, logger: logging.Logger, *, client: Any):
+        """
+        Initializes the Poller with a logger and a client.
+
+        Args:
+            logger (logging.Logger): The logger instance for logging.
+            client (Any): The client instance for making requests.
+        """
         self.logger = logger
         self.client = client
-        # Extract the included and excluded hosts
+
+        # Event notifers
+        self.running = False
+        self._subscribers: dict[Callable, asyncio.Queue] = {}
+
+    # Poller methods
+    @abstractmethod
+    async def fetch(self):
+        """
+        Abstract method to fetch data.
+        Must be implemented by subclasses.
+        """
+        pass
+
+    @abstractmethod
+    async def run(self, *, timeout: float | None = None):
+        """
+        Abstract method to watch for changes. This method must emit signals
+        whenever new data is available.
+
+        Args:
+            timeout (float | None): The timeout duration in seconds. If None,
+                                    the method will wait indefinitely.
+
+        Must be implemented by subclasses.
+        """
+        pass
+
+    # Event methods
+    async def subscribe(self, callback: Callable):
+        """
+        Subscribes to events from this Poller.
+
+        Args:
+            callback (Callable): The callback function to be called when an event is emitted.
+        """
+        # Register subscriber
+        self._subscribers.setdefault(callback, asyncio.Queue())
+        # Fetch data and store locally if requred
+        self._subscribers or self.set_data(await self.fetch())
+
+    def unsubscribe(self, callback: Callable):
+        """
+        Unsubscribes from events.
+
+        Args:
+            callback (Callable): The callback function to be removed from subscribers.
+        """
+        self._subscribers.pop(callback, None)
+
+    async def emit(self):
+        """
+        Triggers an event and notifies all subscribers.
+        Calls each subscriber's callback with the data.
+        """
+        for callback, queue in self._subscribers.items():
+            while not queue.empty():
+                data = await queue.get()
+                if iscoroutinefunction(callback):
+                    await callback(data)
+                else:
+                    callback(data)
+
+    # Data related methods
+    def set_data(self, data):
+        """
+        Sets the data for all subscribers.
+
+        Args:
+            data: The data to be set for subscribers.
+        """
+        for queue in self._subscribers.values():
+            queue.put_nowait(data)
+
+    def has_data(self, callback: Callable):
+        """
+        Checks if there is data available for a specific subscriber.
+
+        Args:
+            callback (Callable): The callback function to check for data.
+
+        Returns:
+            bool: True if there is data available, False otherwise.
+        """
+        return callback in self._subscribers and not self._subscribers[callback].empty()
+
+    async def get_data(self, callback: Callable):
+        """
+        Gets the data for a specific subscriber.
+
+        Args:
+            callback (Callable): The callback function to get data for.
+
+        Returns:
+            The data for the specified callback.
+        """
+        if callback in self._subscribers:
+            return await self._subscribers[callback].get()
+
+
+class DataPoller(Poller):
+    def __init__(self, logger, *, settings: Settings, client: Any):
+        super(DataPoller, self).__init__(logger, client=client)
+
+        # Computed from settings
         self.included_hosts = settings.traefik_included_hosts
         self.excluded_hosts = settings.traefik_excluded_hosts
 
-    @abstractmethod
-    async def poll(self): ...
 
-    @abstractmethod
-    async def run(self): ...
-
-
-class TraefikPoller(Poller):
-    def __init__(self, settings, logger, *, client: requests.Session | None = None):
-        super(TraefikPoller, self).__init__(settings, logger, client or requests.Session())
-
+class TraefikPoller(DataPoller):
+    def __init__(self, logger, *, settings: Settings, client: requests.Session | None = None):
+        super(TraefikPoller, self).__init__(
+            logger,
+            settings=settings,
+            client=client or requests.Session(),
+        )
         # Computed from settings
         self.poll_sec = settings.traefik_poll_seconds
         self.poll_url = f"{settings.traefik_poll_url}/api/http/routers"
 
-    def is_valid_route(self, route):
+    def _is_valid_route(self, route):
+        # Computed from settings
         required_keys = ["status", "name", "rule"]
         if any(key not in route for key in required_keys):
             self.logger.debug(f"Traefik Router Name: {route} - Missing Key")
@@ -339,7 +448,7 @@ class TraefikPoller(Poller):
         # Route is valid and enabled
         return True
 
-    def is_valid_host(self, host):
+    def _is_valid_host(self, host):
         if not any(pattern.match(host) for pattern in self.included_hosts):
             self.logger.debug(f"Traefik Router Host: {host} - Not Match with Include Hosts")
             return False
@@ -349,37 +458,63 @@ class TraefikPoller(Poller):
         # Host is intended to be synced
         return True
 
+    def _validate(self, raw_data: list[dict]) -> tuple[list[str], PollerSource]:
+        data = []
+        for route in raw_data:
+            # Check if route is whell formed
+            if not self._is_valid_route(route):
+                continue
+            # Extract the domains from the rule
+            hosts = re.findall(r"Host\(`([^`]+)`\)", route["rule"])
+            self.logger.debug(f"Traefik Router Name: {route['name']} domains: {hosts}")
+            # Validate domain and queue for sync
+            for host in (host for host in hosts if self._is_valid_host(host)):
+                self.logger.info(f"Found Traefik Router: {route['name']} with Hostname {host}")
+                data.append(host)
+        # Return a collection of zones to sync
+        return data, PollerSource.TRAEFIK
+
     @override
-    async def poll(self):
-        while True:
-            self.logger.debug("Fetching routers from Traefik API")
-            try:
-                response = self.client.get(self.poll_url, self.poll_sec)
-                response.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                self.logger.error(f"Failed to fetch routers from Traefik API: {e}")
-                response = None
+    def fetch(self) -> tuple[list[str, PollerSource]]:
+        try:
+            response = self.client.get(self.poll_url, self.poll_sec)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Failed to fetch routers from Traefik API: {e}")
+            response = None
             # Return a collection of routes
-            yield [] if response is None else response.json()
-            await asyncio.sleep(self.poll_sec)
+        return self._validate([] if response is None else response.json())
 
     @override
-    async def run(self):
-        self.logger.info("Starting Traefik Poller")
-        while True:
-            self.logger.debug("Called check_traefik poller")
-            async for route in self.poll():
-                # Check if route is whell formed
-                if not self.is_valid_route(route):
-                    continue
-                # Extract the domains from the rule
-                hosts = re.findall(r"Host\(`([^`]+)`\)", route["rule"])
-                self.logger.debug(f"Traefik Router Name: {route['name']} domains: {hosts}")
-                # Validate domain and queue for sync
-                for host in (host for host in hosts if self.is_valid_host(host)):
-                    self.logger.info(f"Found Traefik Router: {route['name']} with Hostname {host}")
-                    await SyncManager().put([host], PollerSource.TRAEFIK)
+    async def run(self, timeout: float | None = None):
+        async def _watch() -> AsyncGenerator[list[dict], None]:
+            try:
+                while True:
+                    self.logger.debug("Fetching routers from Traefik API")
+                    self.set_data(await self.fetch())
+                    self.emit()
+                    await asyncio.sleep(self.poll_sec)
+            except asyncio.CancelledError:
+                self.logger.info("Polling has been cancelled. Performing cleanup.")
+                pass
 
+        self.logger.info(f"Starting Traefik Poller: Watching Traefik every {self.poll_sec}")
+        # self.fetch is called for the firstime, whehever a a client subscribe to
+        # this poller, so ther0's no need to initialy  fetch data
+        if timeout:
+            until = datetime.now() + timedelta(seconds=timeout)
+            self.logger.debug(f"Stop prograamed at {until}")
+            try:
+                await asyncio.wait_for(_watch, timeout)
+            except asyncio.TimeoutError:
+                self.logger.info(f"Traefik Polling timeout '{until}'reached")
+        else:
+            # Run indefinitely.
+            await _watch()
+
+
+@deprecated("Use TraefikPoller")
+class TraefikLegacyPoller(TraefikPoller):
     @deprecated("Use run instead")
     def check_traefik(self):
         def is_matching(host, patterns):
@@ -447,7 +582,7 @@ def check_traefik(
 ):
     settings.traefik_included_hosts = included_hosts
     settings.traefik_excluded_hosts = excluded_hosts
-    poller = TraefikPoller(settings, logger)
+    poller = TraefikLegacyPoller(logger, settings=settings)
     return poller.check_traefik()
 
 
@@ -455,7 +590,7 @@ def check_traefik(
 def check_traefik_and_sync_mappings(settings, included_hosts, excluded_hosts, domain_infos, logger):
     settings.traefik_included_hosts = included_hosts
     settings.traefik_excluded_hosts = excluded_hosts
-    poller = TraefikPoller(settings, logger)
+    poller = TraefikLegacyPoller(logger, settings=settings)
     poller.check_traefik_and_sync_mappings(included_hosts, excluded_hosts, domain_infos)
 
 
@@ -483,6 +618,61 @@ class SyncManager(metaclass=Singleton):
                 entries=entries,
             )
         )
+
+
+class DataManager:
+    def __init__(self, *logger: logging.Logger):
+        self.pollers: list[Poller] = []
+        self.tasks = []
+        self.logger = logger
+
+    def __call__(self, data):
+        raise NotImplementedError
+
+    def _combine_data(self, all_data):
+        """Combine data from multiple pollers. Customize as needed."""
+        combined = {}
+        for data in all_data:
+            if data:
+                combined.update(data)  # Example combination logic
+        return combined
+
+    def add_poller(self, poller: Poller):
+        """Add a DataPoller to the manager."""
+        self.pollers.append(poller)
+
+    async def start(self, timeout: float | None = None):
+        """Start all pollers by fetching initial data and subscribing to events."""
+        assert len(self.tasks) == 0
+        # Loop pollers
+        for poller in self.pollers:
+            # Register itelf to be called when new data is available
+            poller.subscribe(self)
+            # Ask poller to start monitoring data
+            self.tasks.append(poller.run(timeout=timeout))
+        try:
+            # wait until timeout is reached or tasks are anceled
+            await asyncio.gather(*self.tasks)
+        except asyncio.CancelledError:
+            # Gracefully stop monitoring
+            await self.stop()
+        except KeyboardInterrupt:
+            # Handle keyboard interruption
+            self.logger.info("Keyboard interruption detected. Stopping tasks...")
+            await self.stop()
+
+    async def stop(self):
+        """Unsubscribe all pollers from their event systems."""
+        # This could be extended to stop any running background tasks if needed
+        tasks = [task.cancel() for task in self.tasks]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.tasks.clear()
+
+    async def aggregate_data(self):
+        """Aggregate and return the latest data from all pollers."""
+        tasks = [poller.get_data() for poller in self.pollers]
+        all_data = await asyncio.gather(*tasks)
+        return self._combine_data(all_data)
 
 
 synced_mappings = {}
@@ -643,25 +833,32 @@ class DockerPoller(Poller):
         return False
 
     @override
-    async def poll(self):
+    async def fetch(self) -> list[DockerContainer]:
+        return [
+            DockerContainer(container, logger=self.logger)
+            for container in self.client.containers.list()
+        ]
+
+    @override
+    async def poll(self) -> AsyncGenerator[list[DockerContainer], None]:
         while True:
-            yield [
-                DockerContainer(container, logger=self.logger)
-                for container in self.client.containers.list()
-            ]
+            yield self.fetch()
             await asyncio.sleep(self.poll_sec)
 
     @override
     async def run(self):
         self.logger.info("Starting Docker Poller")
         while True:
-            self.logger.debug("Called dokcer poller")
-            async for container in self.poll():
-                for cont in container:
-                    raise NotImplementedError("Not implemented")
-            await asyncio.sleep(self.poll_sec)
+            async for containers in self.poll():
+                self.logger.debug("Called docker poller")
+                for container in containers:
+                    if not self.is_enabled(container):
+                        self.logger.debug(f"Skipping container {container.id}")
+                    for host in container.hosts:
+                        await SyncManager().put([host], PollerSource.DOCKER)
 
 
+@deprecated("Use DockerPoller instead")
 def check_container_t2(containers: list | None, settings, logger):
     mappings = {}
 
