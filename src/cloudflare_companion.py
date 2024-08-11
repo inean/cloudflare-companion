@@ -10,7 +10,7 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from asyncio import Queue, iscoroutinefunction
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Enum
 from functools import lru_cache
@@ -316,7 +316,6 @@ class Poller(ABC):
         self.client = client
 
         # Event notifers
-        self.running = False
         self._subscribers: dict[Callable, asyncio.Queue] = {}
 
     # Poller methods
@@ -329,7 +328,7 @@ class Poller(ABC):
         pass
 
     @abstractmethod
-    async def run(self, *, timeout: float | None = None):
+    async def _watch(self, *, timeout: float | None = None):
         """
         Abstract method to watch for changes. This method must emit signals
         whenever new data is available.
@@ -341,6 +340,29 @@ class Poller(ABC):
         Must be implemented by subclasses.
         """
         pass
+
+    async def run(self, timeout: float | None = None):
+        """
+        Starts the Poller and watches for changes.
+
+        Args:
+            timeout (float | None): The timeout duration in seconds. If None,
+                                    the method will wait indefinitely.
+        """
+        name = self.__class__.__name__
+        self.logger.info(f"Starting {name}: Watching Traefik every {self.poll_sec}")
+        # self.fetch is called for the firstime, whehever a a client subscribe to
+        # this poller, so there's no need to initialy fetch data
+        if timeout:
+            until = datetime.now() + timedelta(seconds=timeout)
+            self.logger.debug(f"{name}: Stop programed at {until}")
+            try:
+                await asyncio.wait_for(self._watch, timeout)
+            except asyncio.TimeoutError:
+                self.logger.info(f"{name}: Run timeout '{until}'reached")
+        else:
+            # Run indefinitely.
+            await self._watch()
 
     # Event methods
     async def subscribe(self, callback: Callable):
@@ -476,6 +498,18 @@ class TraefikPoller(DataPoller):
         return data, PollerSource.TRAEFIK
 
     @override
+    async def _watch(self, timeout: float | None = None):
+        try:
+            while True:
+                self.logger.debug("Fetching routers from Traefik API")
+                self.set_data(await self.fetch())
+                self.emit()
+                await asyncio.sleep(self.poll_sec)
+        except asyncio.CancelledError:
+            self.logger.info("Polling has been cancelled. Performing cleanup.")
+            pass
+
+    @override
     def fetch(self) -> tuple[list[str, PollerSource]]:
         try:
             response = self.client.get(self.poll_url, self.poll_sec)
@@ -485,33 +519,6 @@ class TraefikPoller(DataPoller):
             response = None
             # Return a collection of routes
         return self._validate([] if response is None else response.json())
-
-    @override
-    async def run(self, timeout: float | None = None):
-        async def _watch() -> AsyncGenerator[list[dict], None]:
-            try:
-                while True:
-                    self.logger.debug("Fetching routers from Traefik API")
-                    self.set_data(await self.fetch())
-                    self.emit()
-                    await asyncio.sleep(self.poll_sec)
-            except asyncio.CancelledError:
-                self.logger.info("Polling has been cancelled. Performing cleanup.")
-                pass
-
-        self.logger.info(f"Starting Traefik Poller: Watching Traefik every {self.poll_sec}")
-        # self.fetch is called for the firstime, whehever a a client subscribe to
-        # this poller, so ther0's no need to initialy  fetch data
-        if timeout:
-            until = datetime.now() + timedelta(seconds=timeout)
-            self.logger.debug(f"Stop prograamed at {until}")
-            try:
-                await asyncio.wait_for(_watch, timeout)
-            except asyncio.TimeoutError:
-                self.logger.info(f"Traefik Polling timeout '{until}'reached")
-        else:
-            # Run indefinitely.
-            await _watch()
 
 
 @deprecated("Use TraefikPoller")
@@ -848,6 +855,30 @@ class DockerPoller(DataPoller):
         return data, PollerSource.DOCKER
 
     @override
+    async def _watch(self, timeout: float | None = None):
+        since = datetime.now().strftime("%s")
+        while True:
+            until = datetime.now().strftime("%s")
+            event = self.client.events(
+                since=since,
+                until=until,
+                filters={"Type": "service", "Action": "update", "status": "start"},
+                decode=True,
+            )
+            try:
+                if any(event.get("status") == "start" for event in event):
+                    self.logger.debug("Fetching routers from Docker API")
+                    container = await asyncio.to_thread(self.client.containers.get, event.get("id"))
+                    self.set_data(self._validate(container))
+                    self.emit()
+                await asyncio.sleep(self.poll_sec)
+            except docker.errors.NotFound:
+                pass
+            except asyncio.CancelledError:
+                self.logger.info("Polling has been cancelled. Performing cleanup.")
+                pass
+
+    @override
     async def fetch(self) -> list[DockerContainer]:
         return [
             DockerContainer(container, logger=self.logger)
@@ -857,47 +888,6 @@ class DockerPoller(DataPoller):
                 },
             )
         ]
-
-    @override
-    async def run(self, timeout: float | None = None):
-        async def _watch() -> AsyncGenerator[list[dict], None]:
-            since = datetime.now().strftime("%s")
-            while True:
-                until = datetime.now().strftime("%s")
-                event = self.client.events(
-                    since=since,
-                    until=until,
-                    filters={"Type": "service", "Action": "update", "status": "start"},
-                    decode=True,
-                )
-                try:
-                    if any(event.get("status") == "start" for event in event):
-                        self.logger.debug("Fetching routers from Docker API")
-                        container = await asyncio.to_thread(
-                            self.client.containers.get, event.get("id")
-                        )
-                        self.set_data(self._validate(container))
-                        self.emit()
-                    await asyncio.sleep(self.poll_sec)
-                except docker.errors.NotFound:
-                    pass
-                except asyncio.CancelledError:
-                    self.logger.info("Polling has been cancelled. Performing cleanup.")
-                    pass
-
-        self.logger.info("Starting Docker Poller")
-        # self.fetch is called for the firstime, whehever a a client subscribe to
-        # this poller, so ther0's no need to initialy  fetch data
-        if timeout:
-            until = datetime.now() + timedelta(seconds=timeout)
-            self.logger.debug(f"Stop prograamed at {until}")
-            try:
-                await asyncio.wait_for(_watch, timeout)
-            except asyncio.TimeoutError:
-                self.logger.info(f"Traefik Polling timeout '{until}'reached")
-        else:
-            # Run indefinitely.
-            await _watch()
 
 
 @deprecated("Use DockerPoller instead")
