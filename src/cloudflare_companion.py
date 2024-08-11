@@ -7,16 +7,13 @@ import logging
 import os
 import re
 import sys
-import time
 from abc import ABC, abstractmethod
-from asyncio import Queue, iscoroutinefunction
+from asyncio import iscoroutinefunction
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Enum
 from functools import lru_cache
-from logging import Logger
 from typing import Any, TypedDict
-from urllib.parse import urlparse
 
 import docker
 import docker.errors
@@ -173,14 +170,6 @@ def initialize_logger(settings):
     return logger
 
 
-def is_domain_excluded(logger, name, dom: DomainsModel):
-    for sub_dom in dom.excluded_sub_domains:
-        if f"{sub_dom}.{dom.name}" in name:
-            logger.info(f"Ignoring {name} because it falls until excluded sub domain: {sub_dom}")
-            return True
-    return False
-
-
 class Singleton(type):
     _instances = {}
 
@@ -190,21 +179,46 @@ class Singleton(type):
         return cls._instances[cls]
 
 
-class CloudFlareConfig(TypedDict, total=False):
+class MapperConfig(TypedDict, total=False):
+    delay_sync: float
+    """Delay in seconds before syncing mappings"""
     max_retries: int
     """Max number of retries to attempt before exponential backoff fails"""
+
+
+class Mapper(metaclass=Singleton):
+    config: MapperConfig = {
+        "delay_sync": 0,
+    }
+
+    def __init__(self, logger, *, settings: Settings):
+        super(Mapper, self).__init__()
+        self.logger = logger
+        self.mappings = {}
+        self.domains = settings.domains
+
+    async def put(self, name, value, wait_for: float = 0):
+        if wait_for > 0:
+            self.logger.info(f"Wait {wait_for} secs before adding mapping {name} -> {value}")
+            await asyncio.sleep(wait_for)
+        self.mappings[name] = value
+        self.logger.info(f"Added mapping {name} -> {value}")
+
+    @abstractmethod
+    async def sync(self): ...
 
 
 class CloudFlareException(Exception):
     pass
 
 
-class CloudFlareZones(metaclass=Singleton):
-    config: CloudFlareConfig = {
+class CloudFlareZones(Mapper):
+    config: MapperConfig = {
+        "delay_sync": 0,
         "max_retries": 5,
     }
 
-    def __init__(self, settings: Settings, logger: Logger, *, client: CloudFlare | None = None):
+    def __init__(self, logger, *, settings: Settings, client: CloudFlare | None = None):
         if client is None:
             assert settings.cf_token is not None
             client = CloudFlare(
@@ -216,12 +230,14 @@ class CloudFlareZones(metaclass=Singleton):
 
         # Set up the client and logger
         self.client = client
-        self.logger = logger
 
         # Extract required settings
         self.dry_run = settings.dry_run
         self.rc_type = settings.rc_type
         self.refresh_entries = settings.refresh_entries
+
+        # Initialize the parent class
+        super(CloudFlareZones, self).__init__(logger, settings=settings)
 
     async def get_records(self, zone_id: str, name: str):
         for retry in range(self.config["max_retries"]):
@@ -252,6 +268,13 @@ class CloudFlareZones(metaclass=Singleton):
 
     # Start Program to update the Cloudflare
     async def update_zones(self, name, domain_infos: list[DomainsModel]):
+        def is_domain_excluded(logger, name, dom: DomainsModel):
+            for sub_dom in dom.excluded_sub_domains:
+                if f"{sub_dom}.{dom.name}" in name:
+                    logger.info(f"Ignoring {name}: It falls until excluded sub domain: {sub_dom}")
+                    return True
+            return False
+
         ok = True
         for domain_info in domain_infos:
             # Don't update the domain if it's the same as the target domain, which sould be used on tunnel
@@ -293,7 +316,7 @@ class CloudFlareZones(metaclass=Singleton):
     @deprecated("Use update_zones instead")
     @staticmethod
     def point_domain(settings, name, domain_infos: list[DomainsModel], logger):
-        client = CloudFlareZones(settings, logger)
+        client = CloudFlareZones(logger, settings=settings)
         return asyncio.run(client.update_zones(name, domain_infos))
 
 
@@ -613,21 +636,6 @@ class ZoneUpdateJob(TypedDict, total=False):
     """List of entries to update"""
 
 
-class SyncManager(metaclass=Singleton):
-    def __init__(self, queue: Queue | None = None):
-        self.queue = queue or Queue(max_size=len(PollerSource))
-        self.entries = {}
-
-    async def put(self, entries: list[str], source: PollerSource):
-        await self.queue.put(
-            ZoneUpdateJob(
-                timestamp=time.monotonic_ns(),
-                source=source,
-                entries=entries,
-            )
-        )
-
-
 class DataManager:
     def __init__(self, *logger: logging.Logger):
         self.pollers: list[Poller] = []
@@ -746,36 +754,26 @@ def get_initial_mappings(client, settings: Settings, included_hosts, excluded_ho
     return mappings
 
 
-def uri_valid(x):
-    try:
-        result = urlparse(x)
-        return all([result.scheme, result.netloc])
-    except ValueError:
-        return False
-
-
 def report_current_status_and_settings(logger: logging.Logger, settings: Settings):
     if settings.dry_run:
         logger.warning(f"Dry Run: {settings.dry_run}")
-    logger.debug(f"Docker Polling: {settings.enable_docker_poll}")
-    logger.debug(f"Refresh Entries: {settings.refresh_entries}")
     logger.debug(f"Default TTL: {settings.default_ttl}")
+    logger.debug(f"Refresh Entries: {settings.refresh_entries}")
 
     if settings.enable_traefik_poll:
-        if uri_valid(settings.traefik_poll_url):
-            logger.debug("Traefik Poll Url: %s", settings.traefik_poll_url)
-            logger.debug("Traefik Poll Seconds: %s", settings.traefik_poll_seconds)
+        # Check if the URL is valid. Patttern is a bit relaxed, but ne enough
+        if re.match(r"^\w+://[^/?#]+", settings.traefik_poll_url):
+            logger.debug(f"Traefik Poll Url: {settings.traefik_poll_url}")
+            logger.debug(f"Traefik Poll Seconds: {settings.traefik_poll_seconds}")
         else:
             settings.enable_traefik_poll = False
-            logger.error(
-                "Traefik Polling Mode disabled because traefik url is invalid: %s",
-                settings.traefik_poll_url,
-            )
+            logger.error(f"Traefik polling disabled: Bad url: {settings.traefik_poll_url}")
 
-    logger.debug("Traefik Polling Mode: %s", False)
+    logger.debug(f"Traefik Polling Mode: {'On' if settings.enable_traefik_poll else 'Off'}")
+    logger.debug(f"Docker Polling Mode: {'On' if settings.enable_docker_poll else 'Off'}")
 
     for dom in settings.domains:
-        logger.debug("Domain Configuration: %s", dom)
+        logger.debug(f"Domain Configuration: {dom}")
 
 
 class DockerContainer:
@@ -966,8 +964,18 @@ async def main():
     report_current_status_and_settings(logger, settings)
 
     # Init agents
+    manager = DataManager(logger=logger)
+
+    # Docker poller
     if settings.enable_docker_poll:
-        dk_agent = DockerPoller(settings, logger).client
+        poller = DockerPoller(logger, settings=settings)
+        manager.add_poller(poller)
+        dk_agent = poller.client
+
+    # Traefik poller
+    if settings.enable_traefik_poll:
+        poller = TraefikPoller(logger, settings=settings)
+        manager.add_poller(poller)
 
     # Init mappings
     mappings = get_initial_mappings(
@@ -1002,7 +1010,7 @@ async def main():
 
     # Run pollers in parallel
     try:
-        await asyncio.gather(*polls)
+        await manager.start()
     except asyncio.CancelledError:
         logger.info("Pollers were stopped...")
 
