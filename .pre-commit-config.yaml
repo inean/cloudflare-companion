@@ -21,3 +21,14 @@ repos:
         language: system
         types: ["dockerfile"]
         entry: hadolint
+
+  - repo: local
+    hooks:
+      - id: update-version
+        name: Update Version
+        entry: scripts/versioning.py
+        language: python
+        pass_filenames: false
+        stages: [commit]
+        files: ^pyproject\.toml$
+        additional_dependencies: [toml]

@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 # Assuming the function check_container_t2 is imported from the module
-from cloudflare_companion import DockerContainer, DockerPoller, check_container_t2
+from cloudflare_companion import check_container_t2
+from pollers.docker import DockerContainer, DockerPoller
 
 
 @pytest.fixture

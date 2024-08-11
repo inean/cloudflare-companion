@@ -22,9 +22,13 @@ dev-dependencies = [
     "pytest>=8.3.2",
     "pytest-asyncio>=0.23.8",
     "pytest-cov>=5.0.0",
+    "toml>=0.10.2",
 ]
 managed = true
 virtual = true
+
+[tool.hatch.version]
+path = "src/__about__.py"
 
 [tool.pytest.ini_options]
 pythonpath = [

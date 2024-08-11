@@ -3,10 +3,8 @@ import re
 from unittest.mock import MagicMock, patch
 
 import pytest
-from cloudflare_companion import (
-    Settings,
-    check_traefik,
-)
+from cloudflare_companion import check_traefik
+from settings import Settings
 
 
 @pytest.fixture
