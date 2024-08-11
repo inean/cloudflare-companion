@@ -18,14 +18,14 @@ from typing import Any, TypedDict
 import docker
 import docker.errors
 import requests
+from CloudFlare import CloudFlare
+from CloudFlare import exceptions as CloudFlareExceptions
 
 # Inject custom methods into EventSettingsSource tu get support for:
 # - _FIELD  like env vars
 # -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
 #
-from _settings import _EnvSettingsSource
-from CloudFlare import CloudFlare
-from CloudFlare import exceptions as CloudFlareExceptions
+from internal._settings import _EnvSettingsSource
 from pydantic import BaseModel, ValidationError, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
 from typing_extensions import Self, deprecated, override

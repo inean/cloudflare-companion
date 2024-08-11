@@ -38,9 +38,7 @@ class _EnvSettingsSource(EnvSettingsSource):
                 continue
             # we remove the prefix before splitting in case the prefix has characters in common with the delimiter
             env_name_without_prefix = env_name[self.env_prefix_len :]
-            _, *keys, last_key = env_name_without_prefix.split(
-                self.env_nested_delimiter
-            )
+            _, *keys, last_key = env_name_without_prefix.split(self.env_nested_delimiter)
             env_var = result
             target_field: FieldInfo | None = field
             for key in keys:
@@ -54,17 +52,13 @@ class _EnvSettingsSource(EnvSettingsSource):
             # check if env_val maps to a complex field and if so, parse the env_val
             if (target_field or is_dict or is_list) and env_val:
                 if target_field:
-                    is_complex, allow_json_failure = self._field_is_complex(
-                        target_field
-                    )
+                    is_complex, allow_json_failure = self._field_is_complex(target_field)
                 else:
                     # nested field type is dict or list
                     is_complex, allow_json_failure = True, True
                 if is_complex:
                     try:
-                        env_val = self.decode_complex_value(
-                            last_key, target_field, env_val
-                        )  # type: ignore
+                        env_val = self.decode_complex_value(last_key, target_field, env_val)  # type: ignore
                     except ValueError as e:
                         if not allow_json_failure:
                             raise e
@@ -84,9 +78,7 @@ class _EnvSettingsSource(EnvSettingsSource):
                 result.append(values[i])
         return result
 
-    def get_field_value(
-        self, field: FieldInfo, field_name: str
-    ) -> tuple[Any, str, bool]:
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         # Attenpt to get field wirth default method
         env_val, fkey, is_complex = self._e_get_field_value_(field, field_name)
         # Fallback ro _FILE based get_field_value if previous method fails
