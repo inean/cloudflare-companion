@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -36,16 +36,14 @@ def mock_containers():
 
 @pytest.fixture
 def mock_docker_poller(mock_containers):
-    async def mock_poll_iterator():
-        yield mock_containers
-
     def mock_is_enabled(container):
         return next(iter(container.labels.values()))
 
     with patch("cloudflare_companion.DockerPoller", autospec=True) as MockDockerPoller:
         mock_object = Mock(spec=DockerPoller)
-        mock_object.poll = mock_poll_iterator
-        mock_object.is_enabled = mock_is_enabled
+        mock_object.fetch = AsyncMock(return_value=mock_containers)
+
+        mock_object._is_enabled = mock_is_enabled
         MockDockerPoller.return_value = mock_object
         yield MockDockerPoller
 
@@ -64,6 +62,6 @@ async def test_check_container_t2_no_containers(mock_settings, mock_logger, mock
 
 @pytest.mark.asyncio
 def test_check_container_t2_disabled_container(mock_settings, mock_logger, mock_docker_poller):
-    mock_docker_poller.return_value.is_enabled = MagicMock(return_value=False)
+    mock_docker_poller.return_value._is_enabled = MagicMock(return_value=False)
     mappings = check_container_t2(None, mock_settings, mock_logger)
     assert mappings == {}

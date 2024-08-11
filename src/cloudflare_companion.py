@@ -425,6 +425,7 @@ class DataPoller(Poller):
 
 class TraefikPoller(DataPoller):
     def __init__(self, logger, *, settings: Settings, client: requests.Session | None = None):
+        # Initialize the Poller
         super(TraefikPoller, self).__init__(
             logger,
             settings=settings,
@@ -808,71 +809,113 @@ class DockerContainer:
         return []
 
 
-class DockerPoller(Poller):
-    def __init__(self, settings: Settings, logger, *, client: docker.DockerClient | None = None):
-        # Init Docker client
+class DockerPoller(DataPoller):
+    def __init__(self, logger, *, settings: Settings, client: docker.DockerClient | None = None):
         try:
+            # Init Docker client if not provided
+            logger.debug("Connecting to Docker")
             client = client or docker.from_env(timeout=settings.docker_poll_seconds)
         except docker.errors.DockerException as e:
             logger.error(f"Could not connect to Docker: {e}")
             logger.error(f"Known DOCKER_HOST env is '{os.getenv('DOCKER_HOST') or ''}'")
             sys.exit(1)
 
-        logger.debug("Connected to Docker")
-        super(DockerPoller, self).__init__(settings, logger, client)
+        # Initialize the Poller
+        super(DockerPoller, self).__init__(logger, settings=settings, client=client)
 
         # Computed from settings
         self.poll_sec = settings.docker_poll_seconds
         self.filter_label = re.compile(settings.traefik_filter_label)
         self.filter_value = re.compile(settings.traefik_filter_value)
 
-    def is_enabled(self, container: DockerContainer):
+    def _is_enabled(self, container: DockerContainer):
         for label, value in container.labels.items():
             if self.filter_label.match(label) and self.filter_value.match(value):
                 return True
         return False
 
+    def _validate(self, raw_data: list[DockerContainer]) -> tuple[list[str], PollerSource]:
+        data = []
+        for container in raw_data:
+            # Check if container is enabled
+            if not self._is_enabled(container):
+                self.logger.debug(f"Skipping container {container.id}")
+                continue
+            # Validate domain and queue for sync
+            for host in container.hosts:
+                data.append(host)
+        # Return a collection of zones to sync
+        return data, PollerSource.DOCKER
+
     @override
     async def fetch(self) -> list[DockerContainer]:
         return [
             DockerContainer(container, logger=self.logger)
-            for container in self.client.containers.list()
+            for container in self.client.containers.list(
+                filters={
+                    "status": "running",
+                },
+            )
         ]
 
     @override
-    async def poll(self) -> AsyncGenerator[list[DockerContainer], None]:
-        while True:
-            yield self.fetch()
-            await asyncio.sleep(self.poll_sec)
+    async def run(self, timeout: float | None = None):
+        async def _watch() -> AsyncGenerator[list[dict], None]:
+            since = datetime.now().strftime("%s")
+            while True:
+                until = datetime.now().strftime("%s")
+                event = self.client.events(
+                    since=since,
+                    until=until,
+                    filters={"Type": "service", "Action": "update", "status": "start"},
+                    decode=True,
+                )
+                try:
+                    if any(event.get("status") == "start" for event in event):
+                        self.logger.debug("Fetching routers from Docker API")
+                        container = await asyncio.to_thread(
+                            self.client.containers.get, event.get("id")
+                        )
+                        self.set_data(self._validate(container))
+                        self.emit()
+                    await asyncio.sleep(self.poll_sec)
+                except docker.errors.NotFound:
+                    pass
+                except asyncio.CancelledError:
+                    self.logger.info("Polling has been cancelled. Performing cleanup.")
+                    pass
 
-    @override
-    async def run(self):
         self.logger.info("Starting Docker Poller")
-        while True:
-            async for containers in self.poll():
-                self.logger.debug("Called docker poller")
-                for container in containers:
-                    if not self.is_enabled(container):
-                        self.logger.debug(f"Skipping container {container.id}")
-                    for host in container.hosts:
-                        await SyncManager().put([host], PollerSource.DOCKER)
+        # self.fetch is called for the firstime, whehever a a client subscribe to
+        # this poller, so ther0's no need to initialy  fetch data
+        if timeout:
+            until = datetime.now() + timedelta(seconds=timeout)
+            self.logger.debug(f"Stop prograamed at {until}")
+            try:
+                await asyncio.wait_for(_watch, timeout)
+            except asyncio.TimeoutError:
+                self.logger.info(f"Traefik Polling timeout '{until}'reached")
+        else:
+            # Run indefinitely.
+            await _watch()
 
 
 @deprecated("Use DockerPoller instead")
 def check_container_t2(containers: list | None, settings, logger):
     mappings = {}
 
-    client = DockerPoller(settings, logger=logger)
+    client = DockerPoller(logger, settings=settings)
     if containers is None:
-        containers = asyncio.run(anext(client.poll()))
+        containers = asyncio.run(client.fetch())
     for container in containers or []:
-        if client.is_enabled(container):
+        if client._is_enabled(container):
             for host in container.hosts:
                 mappings[host] = 1
 
     return mappings
 
 
+@deprecated("Use DockerPoller instead")
 async def watch_events(dk_agent, settings):
     t = datetime.now().strftime("%s")
 
