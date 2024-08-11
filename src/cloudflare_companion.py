@@ -179,6 +179,79 @@ class Singleton(type):
         return cls._instances[cls]
 
 
+class EventEmitter:
+    def __init__(self):
+        self._subscribers = {}
+
+    async def subscribe(self, callback: Callable):
+        """
+        Subscribes to events from this Poller.
+
+        Args:
+            callback (Callable): The callback function to be called when an event is emitted.
+        """
+        # Register subscriber
+        self._subscribers.setdefault(callback, asyncio.Queue())
+
+    def unsubscribe(self, callback: Callable):
+        """
+        Unsubscribes from events.
+
+        Args:
+            callback (Callable): The callback function to be removed from subscribers.
+        """
+        self._subscribers.pop(callback, None)
+
+    async def emit(self):
+        """
+        Triggers an event and notifies all subscribers.
+        Calls each subscriber's callback with the data.
+        """
+        for callback, queue in self._subscribers.items():
+            while not queue.empty():
+                data = await queue.get()
+                if iscoroutinefunction(callback):
+                    await callback(data)
+                else:
+                    callback(data)
+
+    # Data related methods
+    def set_data(self, data):
+        """
+        Sets the data for all subscribers.
+
+        Args:
+            data: The data to be set for subscribers.
+        """
+        for queue in self._subscribers.values():
+            queue.put_nowait(data)
+
+    def has_data(self, callback: Callable):
+        """
+        Checks if there is data available for a specific subscriber.
+
+        Args:
+            callback (Callable): The callback function to check for data.
+
+        Returns:
+            bool: True if there is data available, False otherwise.
+        """
+        return callback in self._subscribers and not self._subscribers[callback].empty()
+
+    async def get_data(self, callback: Callable):
+        """
+        Gets the data for a specific subscriber.
+
+        Args:
+            callback (Callable): The callback function to get data for.
+
+        Returns:
+            The data for the specified callback.
+        """
+        if callback in self._subscribers:
+            return await self._subscribers[callback].get()
+
+
 class MapperConfig(TypedDict, total=False):
     delay_sync: float
     """Delay in seconds before syncing mappings"""
@@ -186,12 +259,12 @@ class MapperConfig(TypedDict, total=False):
     """Max number of retries to attempt before exponential backoff fails"""
 
 
-class Mapper(metaclass=Singleton):
+class Mapper(EventEmitter):
     config: MapperConfig = {
         "delay_sync": 0,
     }
 
-    def __init__(self, logger, *, settings: Settings):
+    def __init__(self, logger: logging.Logger, *, settings: Settings):
         super(Mapper, self).__init__()
         self.logger = logger
         self.mappings = {}
@@ -208,11 +281,14 @@ class Mapper(metaclass=Singleton):
     async def sync(self): ...
 
 
+class DataMapper(Mapper, metaclass=Singleton): ...
+
+
 class CloudFlareException(Exception):
     pass
 
 
-class CloudFlareZones(Mapper):
+class CloudFlareZones(DataMapper):
     config: MapperConfig = {
         "delay_sync": 0,
         "max_retries": 5,
@@ -326,7 +402,7 @@ class PollerSource(Enum):
     TRAEFIK = "traefik"
 
 
-class Poller(ABC):
+class Poller(EventEmitter, ABC):
     def __init__(self, logger: logging.Logger, *, client: Any):
         """
         Initializes the Poller with a logger and a client.
@@ -338,8 +414,8 @@ class Poller(ABC):
         self.logger = logger
         self.client = client
 
-        # Event notifers
-        self._subscribers: dict[Callable, asyncio.Queue] = {}
+        # Init event notifiers
+        super(Poller, self).__init__()
 
     # Poller methods
     @abstractmethod
@@ -387,76 +463,13 @@ class Poller(ABC):
             # Run indefinitely.
             await self._watch()
 
-    # Event methods
+    # Event related methods
+    @override
     async def subscribe(self, callback: Callable):
-        """
-        Subscribes to events from this Poller.
-
-        Args:
-            callback (Callable): The callback function to be called when an event is emitted.
-        """
         # Register subscriber
-        self._subscribers.setdefault(callback, asyncio.Queue())
-        # Fetch data and store locally if requred
+        super(Poller, self).subscribe(callback)
+        # Fetch data and store locally if required
         self._subscribers or self.set_data(await self.fetch())
-
-    def unsubscribe(self, callback: Callable):
-        """
-        Unsubscribes from events.
-
-        Args:
-            callback (Callable): The callback function to be removed from subscribers.
-        """
-        self._subscribers.pop(callback, None)
-
-    async def emit(self):
-        """
-        Triggers an event and notifies all subscribers.
-        Calls each subscriber's callback with the data.
-        """
-        for callback, queue in self._subscribers.items():
-            while not queue.empty():
-                data = await queue.get()
-                if iscoroutinefunction(callback):
-                    await callback(data)
-                else:
-                    callback(data)
-
-    # Data related methods
-    def set_data(self, data):
-        """
-        Sets the data for all subscribers.
-
-        Args:
-            data: The data to be set for subscribers.
-        """
-        for queue in self._subscribers.values():
-            queue.put_nowait(data)
-
-    def has_data(self, callback: Callable):
-        """
-        Checks if there is data available for a specific subscriber.
-
-        Args:
-            callback (Callable): The callback function to check for data.
-
-        Returns:
-            bool: True if there is data available, False otherwise.
-        """
-        return callback in self._subscribers and not self._subscribers[callback].empty()
-
-    async def get_data(self, callback: Callable):
-        """
-        Gets the data for a specific subscriber.
-
-        Args:
-            callback (Callable): The callback function to get data for.
-
-        Returns:
-            The data for the specified callback.
-        """
-        if callback in self._subscribers:
-            return await self._subscribers[callback].get()
 
 
 class DataPoller(Poller):
@@ -638,9 +651,12 @@ class ZoneUpdateJob(TypedDict, total=False):
 
 class DataManager:
     def __init__(self, *logger: logging.Logger):
-        self.pollers: list[Poller] = []
         self.tasks = []
         self.logger = logger
+
+        # Subscribers
+        self.pollers: list[Poller] = []
+        self.mappers: list[Mapper] = []
 
     def __call__(self, data):
         raise NotImplementedError
@@ -657,6 +673,10 @@ class DataManager:
         """Add a DataPoller to the manager."""
         self.pollers.append(poller)
 
+    def add_mapper(self, mapper: Mapper):
+        """Add a Mapper to the manager."""
+        self.mappers.append(mapper)
+
     async def start(self, timeout: float | None = None):
         """Start all pollers by fetching initial data and subscribing to events."""
         assert len(self.tasks) == 0
@@ -666,6 +686,12 @@ class DataManager:
             poller.subscribe(self)
             # Ask poller to start monitoring data
             self.tasks.append(poller.run(timeout=timeout))
+        # Loop mappers
+        for mapper in self.mappers:
+            # Register itelf to be called when new data is available
+            mapper.subscribe(self)
+            # Ask mapper to start monitoring data
+            self.tasks.append(mapper.sync())
         try:
             # wait until timeout is reached or tasks are anceled
             await asyncio.gather(*self.tasks)
