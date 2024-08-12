@@ -9,6 +9,8 @@ from pollers import DataPoller, PollerSource
 
 
 class TraefikPoller(DataPoller):
+    source = PollerSource.TRAEFIK
+
     def __init__(self, logger, *, settings: Settings, client: requests.Session | None = None):
         # Initialize the Poller
         super(TraefikPoller, self).__init__(

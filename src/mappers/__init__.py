@@ -21,7 +21,7 @@ class Mapper(EventEmitter):
     }
 
     def __init__(self, logger: logging.Logger, *, settings: Settings):
-        super(Mapper, self).__init__()
+        super(Mapper, self).__init__(logger)
         self.logger = logger
         self.mappings = {}
         self.domains = settings.domains

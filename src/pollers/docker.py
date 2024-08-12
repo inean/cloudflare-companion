@@ -53,6 +53,8 @@ class DockerContainer:
 
 
 class DockerPoller(DataPoller):
+    source = PollerSource.DOCKER
+
     def __init__(self, logger, *, settings: Settings, client: docker.DockerClient | None = None):
         try:
             # Init Docker client if not provided

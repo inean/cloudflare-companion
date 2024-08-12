@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 from events import EventEmitter
 from settings import Settings
@@ -19,8 +19,10 @@ class PollerSource(Enum):
     TRAEFIK = "traefik"
 
 
-class Poller(EventEmitter, ABC):
-    def __init__(self, logger: logging.Logger, *, client: Any):
+class Poller(ABC):
+    source: ClassVar[PollerSource]
+
+    def __init__(self, logger: logging.Logger):
         """
         Initializes the Poller with a logger and a client.
 
@@ -29,10 +31,7 @@ class Poller(EventEmitter, ABC):
             client (Any): The client instance for making requests.
         """
         self.logger = logger
-        self.client = client
-
-        # Init event notifiers
-        super(Poller, self).__init__()
+        self.events = EventEmitter[Poller](logger)
 
     # Poller methods
     @abstractmethod
@@ -83,15 +82,18 @@ class Poller(EventEmitter, ABC):
     # Event related methods
     @override
     async def subscribe(self, callback: Callable):
-        # Register subscriber
-        super(Poller, self).subscribe(callback)
         # Fetch data and store locally if required
         self._subscribers or self.set_data(await self.fetch())
+        # Register subscriber
+        super(Poller, self).subscribe(callback)
 
 
 class DataPoller(Poller):
     def __init__(self, logger, *, settings: Settings, client: Any):
-        super(DataPoller, self).__init__(logger, client=client)
+        super(DataPoller, self).__init__(logger)
+
+        # init client
+        self.client = client
 
         # Computed from settings
         self.included_hosts = settings.traefik_included_hosts
