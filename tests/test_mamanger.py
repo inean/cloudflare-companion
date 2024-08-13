@@ -61,10 +61,10 @@ def test_add_poller(data_manager, mock_poller):
     assert (mock_poller, 5.0) in data_manager.pollers
 
 
-def test_add_mapper(data_manager, mock_mapper):
-    mock_event_emitter = MagicMock(spec=EventEmitter)
-    data_manager.mappers = mock_event_emitter
-    data_manager.add_mapper(mock_mapper, backoff=5.0)
+@pytest.mark.asyncio
+async def test_add_mapper(data_manager: DataManager, mock_mapper):
+    data_manager.mappers = MagicMock(spec=EventEmitter)
+    await data_manager.add_mapper(mock_mapper, backoff=5.0)
     data_manager.mappers.subscribe.assert_called_once_with(mock_mapper, backoff=5.0)
 
 
@@ -103,10 +103,10 @@ async def test_start_no_pollers(data_manager, mock_mapper):
 
 
 @pytest.mark.asyncio
-async def test_start_keyboard_interrupt(data_manager, mock_poller_infinity):
+async def test_start_cancel_interrupt(data_manager, mock_poller_infinity):
     data_manager.add_poller(mock_poller_infinity, backoff=5.0)
     with patch.object(data_manager, "stop", new_callable=AsyncMock) as mock_stop:
-        with patch("asyncio.gather", side_effect=KeyboardInterrupt):
+        with patch("asyncio.gather", side_effect=asyncio.exceptions.CancelledError):
             await data_manager.start(timeout=10.0)
     mock_stop.assert_awaited_once()
 

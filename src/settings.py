@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # Traefik Settings
     enable_traefik_poll: bool = False
     traefik_filter_value: str | None = None
-    traefik_filter_label: str = "traefik.constraint"
+    traefik_filter_label: str | None = None
     refresh_entries: bool = False
     traefik_poll_seconds: int = 5
     traefik_poll_url: str | None = None

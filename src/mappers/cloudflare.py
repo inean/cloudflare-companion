@@ -14,7 +14,7 @@ class CloudFlareException(Exception):
     pass
 
 
-class CloudFlareMapper(DataMapper):
+class CloudFlareMapper(DataMapper[CloudFlare]):
     config: MapperConfig = {
         "delay_sync": 0,
         "max_retries": 5,
@@ -28,7 +28,7 @@ class CloudFlareMapper(DataMapper):
                 token=settings.cf_token,
                 debug=settings.log_level.upper() == "VERBOSE",
             )
-            logger.debugf(f"API Mode: {'Scoped' if not settings.cf_email else 'Global'}")
+            logger.debug(f"API Mode: {'Scoped' if not settings.cf_email else 'Global'}")
 
         # Set up the client and logger
         self.client = client
@@ -39,7 +39,7 @@ class CloudFlareMapper(DataMapper):
         self.refresh_entries = settings.refresh_entries
 
         # Initialize the parent class
-        super(CloudFlareMapper, self).__init__(logger, settings=settings)
+        super(CloudFlareMapper, self).__init__(logger, settings=settings, client=client)
 
     async def get_records(self, zone_id: str, name: str):
         for retry in range(self.config["max_retries"]):
@@ -69,7 +69,7 @@ class CloudFlareMapper(DataMapper):
             self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
 
     # Start Program to update the Cloudflare
-    async def update_zones(self, name, domain_infos: list[DomainsModel]):
+    async def sync(self, name, domain_infos: list[DomainsModel]):
         def is_domain_excluded(logger, name, dom: DomainsModel):
             for sub_dom in dom.excluded_sub_domains:
                 if f"{sub_dom}.{dom.name}" in name:
@@ -109,14 +109,12 @@ class CloudFlareMapper(DataMapper):
                 # Create a new record if it doesn't exist yet
                 else:
                     self.post_record(domain_info.zone_id, data)
-            except CloudFlare.exceptions.CloudFlareAPIError as ex:
+            except CloudFlareExceptions.CloudFlareAPIError as ex:
                 self.logger.error("** %s - %d %s" % (name, ex, ex))
                 ok = False
         return ok
 
     # Start Program to update the Cloudflare
     @deprecated("Use update_zones instead")
-    @staticmethod
-    def point_domain(settings, name, domain_infos: list[DomainsModel], logger):
-        client = CloudFlareMapper(logger, settings=settings)
-        return asyncio.run(client.update_zones(name, domain_infos))
+    def point_domain(self, name, domain_infos: list[DomainsModel]):
+        return asyncio.run(self.sync(name, domain_infos))

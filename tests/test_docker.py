@@ -36,7 +36,7 @@ def mock_containers():
 
 
 @pytest.fixture
-def mock_docker_poller(mock_containers):
+def mock_docker_poller_cls(mock_containers):
     def mock_is_enabled(container):
         return next(iter(container.labels.values()))
 
@@ -50,19 +50,22 @@ def mock_docker_poller(mock_containers):
 
 
 @pytest.mark.asyncio
-def test_check_container_t2(mock_settings, mock_logger, mock_docker_poller):
-    mappings = check_container_t2(None, mock_settings, mock_logger)
+def test_check_container_t2(mock_docker_poller_cls, mock_settings, mock_logger):
+    poller = mock_docker_poller_cls(mock_logger, settings=mock_settings)
+    mappings = check_container_t2(poller, None)
     assert mappings == {"host1.example.com": 1}
 
 
 @pytest.mark.asyncio
-async def test_check_container_t2_no_containers(mock_settings, mock_logger, mock_docker_poller):
-    mappings = check_container_t2([], mock_settings, mock_logger)
+async def test_check_container_t2_no_containers(mock_settings, mock_logger):
+    poller = DockerPoller(mock_logger, settings=mock_settings)
+    mappings = check_container_t2(poller, [])
     assert mappings == {}
 
 
 @pytest.mark.asyncio
-def test_check_container_t2_disabled_container(mock_settings, mock_logger, mock_docker_poller):
-    mock_docker_poller.return_value._is_enabled = MagicMock(return_value=False)
-    mappings = check_container_t2(None, mock_settings, mock_logger)
+def test_check_container_t2_disabled_container(mock_settings, mock_logger):
+    poller = DockerPoller(mock_logger, settings=mock_settings)
+    poller._is_enabled = MagicMock(return_value=False)
+    mappings = check_container_t2(poller, None)
     assert mappings == {}

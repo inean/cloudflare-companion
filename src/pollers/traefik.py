@@ -8,7 +8,7 @@ from typing_extensions import override
 from pollers import DataPoller, PollerSource
 
 
-class TraefikPoller(DataPoller):
+class TraefikPoller(DataPoller[requests.Session]):
     source = PollerSource.TRAEFIK
 
     def __init__(self, logger, *, settings: Settings, client: requests.Session | None = None):
@@ -67,17 +67,17 @@ class TraefikPoller(DataPoller):
         try:
             while True:
                 self.logger.debug("Fetching routers from Traefik API")
-                self.set_data(await self.fetch())
-                self.emit()
+                self.events.set_data(self.fetch())
+                await self.events.emit()
                 await asyncio.sleep(self.poll_sec)
         except asyncio.CancelledError:
-            self.logger.info("Polling has been cancelled. Performing cleanup.")
-            pass
+            self.logger.info("Traefik Polling cancelled. Performing cleanup.")
+            return
 
     @override
     def fetch(self) -> tuple[list[str, PollerSource]]:
         try:
-            response = self.client.get(self.poll_url, self.poll_sec)
+            response = self.client.get(self.poll_url, timeout=self.poll_sec)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Failed to fetch routers from Traefik API: {e}")

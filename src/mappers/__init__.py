@@ -1,10 +1,7 @@
-import asyncio
 import logging
-from abc import abstractmethod
-from typing import TypedDict
+from abc import ABC, abstractmethod
+from typing import Any, Generic, TypedDict, TypeVar
 
-from events import EventEmitter
-from internal._singleton import Singleton
 from settings import Settings
 
 
@@ -15,29 +12,35 @@ class MapperConfig(TypedDict, total=False):
     """Max number of retries to attempt before exponential backoff fails"""
 
 
-class Mapper(EventEmitter):
+class Mapper(ABC):
     config: MapperConfig = {
         "delay_sync": 0,
     }
 
-    def __init__(self, logger: logging.Logger, *, settings: Settings):
-        super(Mapper, self).__init__(logger)
+    def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.mappings = {}
-        self.domains = settings.domains
 
-    async def put(self, name, value, wait_for: float = 0):
-        if wait_for > 0:
-            self.logger.info(f"Wait {wait_for} secs before adding mapping {name} -> {value}")
-            await asyncio.sleep(wait_for)
-        self.mappings[name] = value
-        self.logger.info(f"Added mapping {name} -> {value}")
+    def __call__(self, data): ...
 
     @abstractmethod
     async def sync(self): ...
 
 
-class DataMapper(Mapper, metaclass=Singleton): ...
+T = TypeVar("T")
+
+
+class DataMapper(Mapper, Generic[T]):
+    def __init__(self, logger, *, settings: Settings, client: Any):
+        super(DataMapper, self).__init__(logger)
+
+        # init client
+        self.client: T = client
+
+        # Computed from settings
+        self.domains = settings.domains
+        self.included_hosts = settings.traefik_included_hosts
+        self.excluded_hosts = settings.traefik_excluded_hosts
 
 
 from mappers.cloudflare import CloudFlareMapper  # noqa: E402

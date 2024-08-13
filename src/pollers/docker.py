@@ -52,7 +52,7 @@ class DockerContainer:
         return []
 
 
-class DockerPoller(DataPoller):
+class DockerPoller(DataPoller[docker.DockerClient]):
     source = PollerSource.DOCKER
 
     def __init__(self, logger, *, settings: Settings, client: docker.DockerClient | None = None):
@@ -70,8 +70,8 @@ class DockerPoller(DataPoller):
 
         # Computed from settings
         self.poll_sec = settings.docker_poll_seconds
-        self.filter_label = re.compile(settings.traefik_filter_label)
-        self.filter_value = re.compile(settings.traefik_filter_value)
+        self.filter_label = re.compile(settings.traefik_filter_label or ".*")
+        self.filter_value = re.compile(settings.traefik_filter_value or ".*")
 
     def _is_enabled(self, container: DockerContainer):
         for label, value in container.labels.items():
@@ -113,8 +113,8 @@ class DockerPoller(DataPoller):
             except docker.errors.NotFound:
                 pass
             except asyncio.CancelledError:
-                self.logger.info("Polling has been cancelled. Performing cleanup.")
-                pass
+                self.logger.info("Dokcker polling cancelled. Performing cleanup.")
+                return
 
     @override
     async def fetch(self) -> list[DockerContainer]:

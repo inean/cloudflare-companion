@@ -73,6 +73,13 @@ def report_current_status_and_settings(logger: logging.Logger, settings: Setting
     for dom in settings.domains:
         logger.debug(f"Domain Configuration: {dom}")
 
+    return logger
 
-def get_logger():
+
+def get_logger(settings: Settings | None = None) -> logging.Logger:
+    global logger
+    if logger is None and settings is None:
+        raise ValueError("Logger has not been initialized")
+    # Init logger if needed
+    logger = logger or initialize_logger(settings)
     return logger

@@ -56,6 +56,7 @@ class EventEmitter(Generic[T]):
                     if asyncio.iscoroutinefunction(callback):
                         await callback(data)
                     else:
+                        assert callable(callback)
                         callback(data)
                     # Update last called time
                     return queue, backoff, current_time

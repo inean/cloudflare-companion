@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 from events import EventEmitter
 from settings import Settings
@@ -88,12 +88,15 @@ class Poller(ABC):
         super(Poller, self).subscribe(callback)
 
 
-class DataPoller(Poller):
+T = TypeVar("T")
+
+
+class DataPoller(Poller, Generic[T]):
     def __init__(self, logger, *, settings: Settings, client: Any):
         super(DataPoller, self).__init__(logger)
 
         # init client
-        self.client = client
+        self.client: T = client
 
         # Computed from settings
         self.included_hosts = settings.traefik_included_hosts

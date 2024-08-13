@@ -10,8 +10,8 @@ from pollers import Poller
 
 class DataManager:
     def __init__(self, *, logger: logging.Logger):
-        self.tasks = []
         self.logger = logger
+        self.tasks: list[asyncio.Task] = []
 
         # Subscribers
         self.pollers: set[tuple[Poller, float]] = set()
@@ -29,14 +29,14 @@ class DataManager:
                 combined.update(data)  # Example combination logic
         return combined
 
-    def add_poller(self, poller: Poller, backoff: float | None = None):
+    def add_poller(self, poller: Poller, backoff: float = 0):
         """Add a DataPoller to the manager."""
         assert not any(poller == p for p, _ in self.pollers)
         self.pollers.add((poller, backoff))
 
-    def add_mapper(self, mapper: Mapper, backoff: float | None = None):
+    async def add_mapper(self, mapper: Mapper, backoff: float = 0):
         """Add a Mapper to the manager."""
-        self.mappers.subscribe(mapper, backoff=backoff)
+        await self.mappers.subscribe(mapper, backoff=backoff)
 
     async def start(self, timeout: float | None = None):
         """Start all pollers by fetching initial data and subscribing to events."""
@@ -44,7 +44,7 @@ class DataManager:
         # Loop pollers
         for poller, backoff in self.pollers:
             # Register itelf to be called when new data is available
-            poller.events.subscribe(self, backoff=backoff)
+            await poller.events.subscribe(self, backoff=backoff)
             # Ask poller to start monitoring data
             self.tasks.append(asyncio.create_task(poller.run(timeout=timeout)))
         # Add mappers emission to tasks that mast run concurrently
@@ -56,10 +56,6 @@ class DataManager:
         except asyncio.CancelledError:
             # Gracefully stop monitoring
             await self.stop()
-        except KeyboardInterrupt:
-            # Handle keyboard interruption
-            self.logger.info("Keyboard interruption detected. Stopping tasks...")
-            await self.stop()
         finally:
             # Clear tasks
             self.tasks.clear()
@@ -67,8 +63,9 @@ class DataManager:
     async def stop(self):
         """Unsubscribe all pollers from their event systems."""
         # This could be extended to stop any running background tasks if needed
-        [task.cancel() for task in self.tasks]
-        await asyncio.gather(*self.tasks, return_exceptions=True)
+        if pending := [task for task in self.tasks if task.cancel()]:
+            self.logger.info("Stopping running pollers...")
+            await asyncio.gather(*pending, return_exceptions=True)
         self.tasks.clear()
 
     async def aggregate_data(self):

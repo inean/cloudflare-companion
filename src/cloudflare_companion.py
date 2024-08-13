@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import re
 import sys
 from datetime import datetime
@@ -25,8 +26,8 @@ from typing_extensions import deprecated
 class AsyncRepeatedTimer:
     def __init__(
         self,
-        interval: int,
         function: callable,
+        interval: int,
         *,
         args: tuple | None = None,
         kwargs: dict | None = None,
@@ -37,17 +38,10 @@ class AsyncRepeatedTimer:
         self.kwargs = kwargs or {}
         self.task = None
 
-    async def _run(self):
+    async def run(self):
         while True:
             await asyncio.sleep(self.interval)
             self.function(*self.args, **self.kwargs)
-
-    def start(self):
-        self.task = asyncio.create_task(self._run())
-        return self.task
-
-    def cancel(self):
-        self.task and self.task.cancel()
 
 
 @deprecated("Use TraefikPoller")
@@ -59,7 +53,12 @@ class TraefikLegacyPoller(TraefikPoller):
 
         mappings = {}
         self.logger.debug("Called check_traefik poller")
-        response = requests.get(self.poll_url)
+        try:
+            response = requests.get(self.poll_url)
+        except requests.exceptions.ConnectionError as e:
+            # Extracting the URL and the error message for a shorter log message
+            self.logger.error(f"Error while fetching Traefik data: {str(e)}")
+            return mappings
 
         if response is not None and response.ok:
             for router in response.json():
@@ -98,7 +97,7 @@ class TraefikLegacyPoller(TraefikPoller):
         return mappings
 
     @deprecated("Use run instead")
-    def check_traefik_and_sync_mappings(self, domain_infos):
+    def check_traefik_and_sync_mappings(self, mapper, domain_infos, log):
         """
         Checks Traefik for mappings and syncs them with the domain information.
 
@@ -110,7 +109,7 @@ class TraefikLegacyPoller(TraefikPoller):
         # Extract mappings from Traefik
         traefik_mappings = self.check_traefik()
         # Sync the extracted mappings with the domain information
-        sync_mappings(self.settings, traefik_mappings, domain_infos)
+        sync_mappings(mapper, traefik_mappings, domain_infos)
 
 
 @deprecated("Use TraefikPoller instead")
@@ -124,11 +123,19 @@ def check_traefik(
 
 
 @deprecated("Use TraefikPoller instead")
-def check_traefik_and_sync_mappings(settings, included_hosts, excluded_hosts, domain_infos, logger):
+def check_traefik_and_sync_mappings(
+    traefik_poller,
+    mapper,
+    settings,
+    included_hosts,
+    excluded_hosts,
+    domain_infos,
+    logger,
+):
     settings.traefik_included_hosts = included_hosts
     settings.traefik_excluded_hosts = excluded_hosts
     poller = TraefikLegacyPoller(logger, settings=settings)
-    poller.check_traefik_and_sync_mappings(included_hosts, excluded_hosts, domain_infos)
+    poller.check_traefik_and_sync_mappings(mapper, domain_infos, logger)
 
 
 class ZoneUpdateJob(TypedDict, total=False):
@@ -161,7 +168,7 @@ def add_to_mappings(current_mappings, mappings):
 
 
 @deprecated("Use SyncManager instead")
-def sync_mappings(settings, mappings, domain_infos, logger):
+def sync_mappings(mapper: CloudFlareMapper, mappings, domain_infos):
     """
     Synchronizes the mappings with the domain information.
 
@@ -169,36 +176,31 @@ def sync_mappings(settings, mappings, domain_infos, logger):
         mappings (dict): The mappings to synchronize.
         domain_infos (dict): Domain information for synchronization.
     """
-    for k, v in mappings.items():
-        current_mapping = synced_mappings.get(k)
+    for name, v in mappings.items():
+        current_mapping = synced_mappings.get(name)
         if current_mapping is None or current_mapping > v:
-            if CloudFlareMapper.point_domain(settings, k, domain_infos, logger):
-                synced_mappings[k] = v
+            if mapper.point_domain(name, domain_infos):
+                synced_mappings[name] = v
 
 
-def get_initial_mappings(client, settings: Settings, included_hosts, excluded_hosts, logger):
-    """
-    Initializes the mappings by discovering Docker containers and Traefik services.
-
-    Args:
-        included_hosts (list): List of hosts to include.
-        excluded_hosts (list): List of hosts to exclude.
-
-    Returns:
-        dict: The initial mappings.
-    """
+def get_initial_mappings(
+    docker_poller: DockerPoller,
+    traefik_poller: TraefikLegacyPoller,
+    settings: Settings,
+    logger,
+):
     logger.debug("Starting Initialization Routines")
 
     mappings = {}
-    if settings.enable_docker_poll:
-        for c in client.containers.list():
-            logger.debug("Container List Discovery Loop")
-            add_to_mappings(mappings, check_container_t2(c, settings))
+    if docker_poller and settings.enable_docker_poll:
+        for c in docker_poller.client.containers.list():
+            logger.debug("Docker Container List Discovery Loop")
+            add_to_mappings(mappings, check_container_t2(docker_poller, c))
 
-    if settings.traefik_poll_url:
+    if traefik_poller and settings.traefik_poll_url:
         logger.debug("Traefik List Discovery Loop")
         # Extract mappings from Traefik
-        traefik_mappings = check_traefik(settings, included_hosts, excluded_hosts, logger)
+        traefik_mappings = traefik_poller.check_traefik()
         # Add the extracted mappings to the current mappings
         add_to_mappings(mappings, traefik_mappings)
 
@@ -206,14 +208,13 @@ def get_initial_mappings(client, settings: Settings, included_hosts, excluded_ho
 
 
 @deprecated("Use DockerPoller instead")
-def check_container_t2(containers: list | None, settings, logger):
+def check_container_t2(poller: DockerPoller, containers: list | None):
     mappings = {}
 
-    client = DockerPoller(logger, settings=settings)
     if containers is None:
-        containers = asyncio.run(client.fetch())
+        containers = asyncio.run(poller.fetch())
     for container in containers or []:
-        if client._is_enabled(container):
+        if poller._is_enabled(container):
             for host in container.hosts:
                 mappings[host] = 1
 
@@ -221,17 +222,17 @@ def check_container_t2(containers: list | None, settings, logger):
 
 
 @deprecated("Use DockerPoller instead")
-async def watch_events(dk_agent, settings):
+async def watch_events(poller: DockerPoller, mapper: CloudFlareMapper, domains):
     t = datetime.now().strftime("%s")
 
-    logger.debug("Starting event watch docker events")
-    logger.debug("Time: %s", t)
+    poller.logger.debug("Starting event watch docker events")
+    poller.logger.debug("Time: %s", t)
     forever = 0
 
     while forever < 777:
-        logger.debug("Called docker poller")
+        poller.logger.debug("Called docker poller")
         t_next = datetime.now().strftime("%s")
-        events = dk_agent.events(
+        events = poller.client.events(
             since=t,
             until=t_next,
             filters={"Type": "service", "Action": "update", "status": "start"},
@@ -241,23 +242,101 @@ async def watch_events(dk_agent, settings):
         for event in events:
             if event.get("status") == "start":
                 try:
-                    container = await asyncio.to_thread(dk_agent.containers.get, event.get("id"))
-                    add_to_mappings(
-                        new_mappings,
-                        check_container_t2(container, settings, logger),
+                    container = await asyncio.to_thread(
+                        poller.client.containers.get, event.get("id")
                     )
+                    add_to_mappings(new_mappings, check_container_t2(poller, container))
                 except docker.errors.NotFound:
                     forever = 778
                     pass
-        sync_mappings(settings, new_mappings, settings.domains, logger)
+        sync_mappings(mapper, new_mappings, domains)
         t = t_next
         await asyncio.sleep(5)  # Sleep for 5 seconds before checking for new events
 
 
-async def main():
-    # Load settings
+async def legacy_main(log: logging.Logger, *, settings: Settings):
+    tasks = []
+    mappings = {}
+
+    # Add Cloudflarte mapper
+    cf = CloudFlareMapper(log, settings=settings)
+
+    # Traefik poller
+    if settings.enable_traefik_poll:
+        # Start traefik polling on a separate thread
+        log.debug("(Legacy): Starting traefik router polling")
+        # Add traefik poller
+        traefik = TraefikLegacyPoller(log, settings=settings)
+
+        # Get initial mappings
+        log.debug("Traefik List Discovery Loop")
+        # Extract mappings from Traefik
+        traefik_mappings = traefik.check_traefik()
+        # Add the extracted mappings to the current mappings
+        add_to_mappings(mappings, traefik_mappings)
+
+        # Start legacy poller
+        tasks.append(
+            asyncio.create_task(
+                AsyncRepeatedTimer(
+                    traefik.check_traefik_and_sync_mappings,
+                    settings.traefik_poll_seconds,
+                    args=(cf, settings.domains, log),
+                ).run()
+            )
+        )
+
+    # Docker poller
+    if settings.enable_docker_poll:
+        log.debug("(Legacy): Starting poller router polling")
+        poller = DockerPoller(log, settings=settings)
+
+        # Get initial mappings
+        for container in poller.client.containers.list():
+            log.debug("Docker Container List Discovery Loop")
+            add_to_mappings(mappings, check_container_t2(poller, container))
+
+        # Start legacy poller
+        tasks.append(asyncio.create_task(watch_events(poller, settings, log)))
+
+    # Publish mappings
+    sync_mappings(cf, mappings, settings.domains)
+
+    # Run pollers in parallel
+    await asyncio.gather(*tasks)
+
+
+async def main(log: logging.Logger, *, settings: Settings):
+    # Init mnager
+    manager = DataManager(logger=log)
+
+    # Add Cloudflarte mapper
+    cf = CloudFlareMapper(log, settings=settings)
+    await manager.add_mapper(cf, backoff=5)
+
+    # Add Pollers
+    if settings.enable_traefik_poll:
+        poller = TraefikPoller(log, settings=settings)
+        manager.add_poller(poller)
+    if settings.enable_docker_poll:
+        poller = DockerPoller(log, settings=settings)
+        manager.add_poller(poller)
+
+    # Start manager
+    await manager.start()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Cloudflare Companion")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
     try:
-        settings = Settings()  # type: ignore[call-arg]
+        # Load settings
+        args = parse_args()
+        settings = Settings()
 
         # Check for uppercase docker secrets or env variables
         assert settings.cf_token
@@ -269,76 +348,12 @@ async def main():
         sys.exit(1)
 
     # Set up logging and dump runtime settings
-    log = logger.initialize_logger(settings)
-    logger.report_current_status_and_settings(log, settings)
-
-    # Init agents
-    manager = DataManager(logger=log)
-
-    # Docker poller
-    if settings.enable_docker_poll:
-        poller = DockerPoller(log, settings=settings)
-        manager.add_poller(poller)
-        dk_agent = poller.client
-
-    # Traefik poller
-    if settings.enable_traefik_poll:
-        poller = TraefikPoller(log, settings=settings)
-        manager.add_poller(poller)
-
-    # Init mappings
-    mappings = get_initial_mappings(
-        dk_agent,
-        settings,
-        settings.traefik_included_hosts,
-        settings.traefik_excluded_hosts,
-    )
-    sync_mappings(settings, mappings, settings.domains)
-
-    # Start traefik polling on a separate thread
-    polls = []
-    if settings.enable_traefik_poll:
-        log.debug("Starting traefik router polling")
-        traefik_poll = AsyncRepeatedTimer(
-            settings.traefik_poll_seconds,
-            check_traefik_and_sync_mappings,
-            args=(
-                settings,
-                settings.traefik_included_hosts,
-                settings.traefik_excluded_hosts,
-                settings.domains,
-                logger,
-            ),
-        )
-        polls.append(traefik_poll.start())
-
-    # Start docker polleer
-    if settings.enable_docker_poll:
-        docker_poll = asyncio.create_task(watch_events(dk_agent, settings))
-        polls.append(docker_poll)
-
-    # Run pollers in parallel
+    log = logger.report_current_status_and_settings(logger.get_logger(settings), settings)
     try:
-        await manager.start()
-    except asyncio.CancelledError:
-        log.info("Pollers were stopped...")
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Cloudflare Companion")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    args = parse_args()
-    try:
-        asyncio.run(main())
+        # asyncio.run(main(log, settings=settings))
+        asyncio.run(legacy_main(log, settings=settings))
     except KeyboardInterrupt:
-        logger.get_logger().info("Exiting...")
-        for task in asyncio.all_tasks():
-            task.cancel()
-        sys.exit(0)
-    except Exception as e:
-        logger.get_logger().error(f"An error occurred: {e}")
+        # asyncio.run will cancel any task pending when the main function exits
+        log.info("Cancel by user.")
+        log.info("Exiting...")
         sys.exit(1)
