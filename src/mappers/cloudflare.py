@@ -28,7 +28,7 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
                 token=settings.cf_token,
                 debug=settings.log_level.upper() == "VERBOSE",
             )
-            logger.debug(f"API Mode: {'Scoped' if not settings.cf_email else 'Global'}")
+            logger.debug(f"CloudFlare API Mode: {'Scoped' if not settings.cf_email else 'Global'}")
 
         # Set up the client and logger
         self.client = client
@@ -40,6 +40,9 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
 
         # Initialize the parent class
         super(CloudFlareMapper, self).__init__(logger, settings=settings, client=client)
+
+    async def __call__(self, *args, **kwargs):
+        return await self.sync(*args, **kwargs)
 
     async def get_records(self, zone_id: str, name: str):
         for retry in range(self.config["max_retries"]):

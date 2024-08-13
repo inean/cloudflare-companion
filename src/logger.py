@@ -53,13 +53,12 @@ def initialize_logger(settings: Settings):
 
 
 def report_current_status_and_settings(logger: logging.Logger, settings: Settings):
-    if settings.dry_run:
-        logger.warning(f"Dry Run: {settings.dry_run}")
+    settings.dry_run and logger.info(f"Dry Run: {settings.dry_run}")
     logger.debug(f"Default TTL: {settings.default_ttl}")
     logger.debug(f"Refresh Entries: {settings.refresh_entries}")
 
+    logger.debug(f"Traefik Polling Mode: {'On' if settings.enable_traefik_poll else 'Off'}")
     if settings.enable_traefik_poll:
-        # Check if the URL is valid. Patttern is a bit relaxed, but ne enough
         if re.match(r"^\w+://[^/?#]+", settings.traefik_poll_url):
             logger.debug(f"Traefik Poll Url: {settings.traefik_poll_url}")
             logger.debug(f"Traefik Poll Seconds: {settings.traefik_poll_seconds}")
@@ -67,11 +66,16 @@ def report_current_status_and_settings(logger: logging.Logger, settings: Setting
             settings.enable_traefik_poll = False
             logger.error(f"Traefik polling disabled: Bad url: {settings.traefik_poll_url}")
 
-    logger.debug(f"Traefik Polling Mode: {'On' if settings.enable_traefik_poll else 'Off'}")
     logger.debug(f"Docker Polling Mode: {'On' if settings.enable_docker_poll else 'Off'}")
+    logger.debug(f"Docker Poll Seconds: {settings.docker_poll_seconds}")
 
     for dom in settings.domains:
-        logger.debug(f"Domain Configuration: {dom}")
+        logger.debug(f"Domain Configuration: {dom.name}")
+        logger.debug(f"  Target Domain: {dom.target_domain}")
+        logger.debug(f"  TTL: {dom.ttl}")
+        logger.debug(f"  Record Type: {dom.rc_type}")
+        logger.debug(f"  Proxied: {dom.proxied}")
+        logger.debug(f"  Excluded Subdomains: {dom.excluded_sub_domains}")
 
     return logger
 

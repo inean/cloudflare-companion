@@ -2,6 +2,7 @@ import asyncio
 import re
 
 import requests
+from internal._decorators import BackoffError, async_backoff
 from settings import Settings
 from typing_extensions import override
 
@@ -9,7 +10,9 @@ from pollers import DataPoller, PollerSource
 
 
 class TraefikPoller(DataPoller[requests.Session]):
-    source = PollerSource.TRAEFIK
+    config = DataPoller.config | {
+        "source": "traefik",
+    }
 
     def __init__(self, logger, *, settings: Settings, client: requests.Session | None = None):
         # Initialize the Poller
@@ -60,14 +63,14 @@ class TraefikPoller(DataPoller[requests.Session]):
                 self.logger.info(f"Found Traefik Router: {route['name']} with Hostname {host}")
                 data.append(host)
         # Return a collection of zones to sync
-        return data, PollerSource.TRAEFIK
+        return data, self.config["source"]
 
     @override
     async def _watch(self, timeout: float | None = None):
         try:
             while True:
                 self.logger.debug("Fetching routers from Traefik API")
-                self.events.set_data(self.fetch())
+                self.events.set_data(await self.fetch())
                 await self.events.emit()
                 await asyncio.sleep(self.poll_sec)
         except asyncio.CancelledError:
@@ -75,12 +78,13 @@ class TraefikPoller(DataPoller[requests.Session]):
             return
 
     @override
+    @async_backoff
     def fetch(self) -> tuple[list[str, PollerSource]]:
         try:
             response = self.client.get(self.poll_url, timeout=self.poll_sec)
             response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Failed to fetch routers from Traefik API: {e}")
-            response = None
-            # Return a collection of routes
-        return self._validate([] if response is None else response.json())
+        except requests.exceptions.RequestException as err:
+            self.logger.error(f"Failed to fetch route from Traefik API: {err}")
+            raise BackoffError(self._validate([]))
+        # Return a collection of routes
+        return self._validate(response.json())

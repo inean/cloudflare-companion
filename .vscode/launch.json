@@ -5,12 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Depurador de Python: Archivo actual con argumentos",
+            "name": "Run with local .env file",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "${workspaceFolder}/src/cloudflare_companion.py",
             "console": "integratedTerminal",
-            "args": [ ],
+            "args": [ "--env-file", "${workspaceFolder}/.env" ],
             "justMyCode": false
         }
     ]

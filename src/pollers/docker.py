@@ -8,6 +8,7 @@ from functools import lru_cache
 
 import docker
 import docker.errors
+from internal._decorators import async_backoff
 from settings import Settings
 from typing_extensions import override
 
@@ -53,13 +54,16 @@ class DockerContainer:
 
 
 class DockerPoller(DataPoller[docker.DockerClient]):
-    source = PollerSource.DOCKER
+    config = DataPoller.config | {
+        "source": "docker",
+    }
 
     def __init__(self, logger, *, settings: Settings, client: docker.DockerClient | None = None):
         try:
             # Init Docker client if not provided
-            logger.debug("Connecting to Docker")
+            logger.debug("Connecting to Docker...")
             client = client or docker.from_env(timeout=settings.docker_poll_seconds)
+            logger.debug(f"Connected to Docker at '{client.info()['Name']}'")
         except docker.errors.DockerException as e:
             logger.error(f"Could not connect to Docker: {e}")
             logger.error(f"Known DOCKER_HOST env is '{os.getenv('DOCKER_HOST') or ''}'")
@@ -90,7 +94,7 @@ class DockerPoller(DataPoller[docker.DockerClient]):
             for host in container.hosts:
                 data.append(host)
         # Return a collection of zones to sync
-        return data, PollerSource.DOCKER
+        return data, self.config["source"]
 
     @override
     async def _watch(self, timeout: float | None = None):
@@ -117,12 +121,15 @@ class DockerPoller(DataPoller[docker.DockerClient]):
                 return
 
     @override
-    async def fetch(self) -> list[DockerContainer]:
-        return [
-            DockerContainer(container, logger=self.logger)
-            for container in self.client.containers.list(
-                filters={
-                    "status": "running",
-                },
-            )
-        ]
+    @async_backoff
+    def fetch(self) -> list[DockerContainer]:
+        return self._validate(
+            [
+                DockerContainer(container, logger=self.logger)
+                for container in self.client.containers.list(
+                    filters={
+                        "status": "running",
+                    },
+                )
+            ]
+        )

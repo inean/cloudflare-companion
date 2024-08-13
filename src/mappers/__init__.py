@@ -21,6 +21,7 @@ class Mapper(ABC):
         self.logger = logger
         self.mappings = {}
 
+    @abstractmethod
     def __call__(self, data): ...
 
     @abstractmethod

@@ -19,7 +19,7 @@ class DataManager:
 
     def __call__(self, data):
         # Data can come from pollers or mappers
-        raise NotImplementedError
+        self.logger.error(f"DATA MANAGEER: Received data: {data}")
 
     def _combine_data(self, all_data):
         """Combine data from multiple pollers. Customize as needed."""

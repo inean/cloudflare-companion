@@ -5,22 +5,45 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, Generic, Literal, TypedDict, TypeVar
+from weakref import ref as WeakRef
 
 from events import EventEmitter
 from settings import Settings
 from typing_extensions import override
 
 
-class PollerSource(Enum):
-    MANUAL = "manual"
-    DOCKER = "docker"
-    TRAEFIK = "traefik"
+class PollerEventEmitter(EventEmitter[Callable]):
+    def __init__(self, logger: logging.Logger, *, poller: Poller):
+        self.poller = WeakRef(poller)
+        super(PollerEventEmitter, self).__init__(logger)
+
+    # Event related methods
+    @override
+    async def subscribe(self, callback: Callable, backoff: float = 0):
+        # Fetch data and store locally if required
+        self._subscribers or self.set_data(await self.poller().fetch())
+        # Register subscriber
+        await super(PollerEventEmitter, self).subscribe(callback, backoff=backoff)
+
+
+PollerSource = Literal["manual", "docker", "traefik"]
+
+
+class PollerConfig(TypedDict, total=False):
+    max_retries: int
+    """Max number of retries to attempt before exponential backoff fails"""
+    backoff_factor: int
+    """Factor to multiply the backoff time by"""
+    source: PollerSource
+    """The source of the poller"""
 
 
 class Poller(ABC):
-    source: ClassVar[PollerSource]
+    config: PollerConfig = {
+        "max_retries": 0,
+        "backoff_factor": 4,
+    }
 
     def __init__(self, logger: logging.Logger):
         """
@@ -31,7 +54,7 @@ class Poller(ABC):
             client (Any): The client instance for making requests.
         """
         self.logger = logger
-        self.events = EventEmitter[Poller](logger)
+        self.events = PollerEventEmitter(logger, poller=self)
 
     # Poller methods
     @abstractmethod
@@ -65,7 +88,7 @@ class Poller(ABC):
                                     the method will wait indefinitely.
         """
         name = self.__class__.__name__
-        self.logger.info(f"Starting {name}: Watching Traefik every {self.poll_sec}")
+        self.logger.info(f"Starting {name}: Watching every {self.poll_sec}")
         # self.fetch is called for the firstime, whehever a a client subscribe to
         # this poller, so there's no need to initialy fetch data
         if timeout:
@@ -78,14 +101,6 @@ class Poller(ABC):
         else:
             # Run indefinitely.
             await self._watch()
-
-    # Event related methods
-    @override
-    async def subscribe(self, callback: Callable):
-        # Fetch data and store locally if required
-        self._subscribers or self.set_data(await self.fetch())
-        # Register subscriber
-        super(Poller, self).subscribe(callback)
 
 
 T = TypeVar("T")

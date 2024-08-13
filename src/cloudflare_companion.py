@@ -15,6 +15,7 @@ import docker.errors
 import logger as logger
 import requests
 from __about__ import __version__ as VERSION
+from dotenv import load_dotenv
 from manager import DataManager
 from mappers import CloudFlareMapper
 from pollers import DockerPoller, PollerSource, TraefikPoller
@@ -328,6 +329,7 @@ async def main(log: logging.Logger, *, settings: Settings):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Cloudflare Companion")
+    parser.add_argument("--env-file", type=str, help="Path to the .env file")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     return parser.parse_args()
 
@@ -336,6 +338,9 @@ if __name__ == "__main__":
     try:
         # Load settings
         args = parse_args()
+        # Load environment variables from the specified env file
+        args.env_file and load_dotenv(args.env_file)
+
         settings = Settings()
 
         # Check for uppercase docker secrets or env variables
@@ -350,8 +355,8 @@ if __name__ == "__main__":
     # Set up logging and dump runtime settings
     log = logger.report_current_status_and_settings(logger.get_logger(settings), settings)
     try:
-        # asyncio.run(main(log, settings=settings))
-        asyncio.run(legacy_main(log, settings=settings))
+        asyncio.run(main(log, settings=settings))
+        # asyncio.run(legacy_main(log, settings=settings))
     except KeyboardInterrupt:
         # asyncio.run will cancel any task pending when the main function exits
         log.info("Cancel by user.")
