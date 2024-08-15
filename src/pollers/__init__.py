@@ -16,15 +16,15 @@ from typing_extensions import override
 class PollerEventEmitter(EventEmitter[Callable]):
     def __init__(self, logger: logging.Logger, *, poller: Poller):
         self.poller = WeakRef(poller)
-        super(PollerEventEmitter, self).__init__(logger)
+        super(PollerEventEmitter, self).__init__(logger, name=poller.config["source"])
 
     # Event related methods
     @override
     async def subscribe(self, callback: Callable, backoff: float = 0):
-        # Fetch data and store locally if required
-        self._subscribers or self.set_data(await self.poller().fetch())
         # Register subscriber
         await super(PollerEventEmitter, self).subscribe(callback, backoff=backoff)
+        # Fetch data and store locally if required
+        self.set_data(await self.poller().fetch(), callback=callback)
 
 
 PollerSource = Literal["manual", "docker", "traefik"]
@@ -88,7 +88,7 @@ class Poller(ABC):
                                     the method will wait indefinitely.
         """
         name = self.__class__.__name__
-        self.logger.info(f"Starting {name}: Watching every {self.poll_sec}")
+        self.logger.info(f"Starting {name}: Watching for changes")
         # self.fetch is called for the firstime, whehever a a client subscribe to
         # this poller, so there's no need to initialy fetch data
         if timeout:

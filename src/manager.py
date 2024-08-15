@@ -5,7 +5,7 @@ import logging
 
 from events import EventEmitter
 from mappers import Mapper
-from pollers import Poller
+from pollers import Poller, PollerSource
 
 
 class DataManager:
@@ -15,19 +15,25 @@ class DataManager:
 
         # Subscribers
         self.pollers: set[tuple[Poller, float]] = set()
-        self.mappers: EventEmitter[Mapper] = EventEmitter(logger)
+        self.mappers: EventEmitter[Mapper] = EventEmitter(logger, name="Manager")
 
-    def __call__(self, data):
-        # Data can come from pollers or mappers
-        self.logger.error(f"DATA MANAGEER: Received data: {data}")
+        # Data
+        self.data: dict[PollerSource, list[str]] = {}
 
-    def _combine_data(self, all_data):
-        """Combine data from multiple pollers. Customize as needed."""
-        combined = {}
-        for data in all_data:
-            if data:
-                combined.update(data)  # Example combination logic
-        return combined
+    async def __call__(self, names: list[str], source: PollerSource):
+        # Store new data for mappers in each mappers queue
+        self.mappers.set_data((names, source))
+        # Combine data previously received from pollers
+        self._combine_data({source: names})
+        await self.mappers.emit()
+
+    def _combine_data(self, data: dict[PollerSource, list[str]]) -> dict[PollerSource, list[str]]:
+        """Combine data from multiple pollers."""
+        for source, values in data.items():
+            assert isinstance(values, list)
+            self.data.setdefault(source, [])
+            self.data[source].extend(values)
+            self.data[source] = list(set(self.data[source]))
 
     def add_poller(self, poller: Poller, backoff: float = 0):
         """Add a DataPoller to the manager."""
@@ -68,8 +74,13 @@ class DataManager:
             await asyncio.gather(*pending, return_exceptions=True)
         self.tasks.clear()
 
-    async def aggregate_data(self):
+    def aggregate_data(self):
         """Aggregate and return the latest data from all pollers."""
-        tasks = [poller.events.get_data(self) for poller, _ in self.pollers]
-        all_data = await asyncio.gather(*tasks)
-        return self._combine_data(all_data)
+        for poller, _ in self.pollers:
+            try:
+                names, source = poller.events.get_data()
+                self._combine_data({source: names})
+            except asyncio.QueueEmpty:
+                pass
+        # Return the combined data
+        return self.data

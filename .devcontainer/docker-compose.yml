@@ -27,6 +27,7 @@ services:
 
   traefik:
     image: traefik:v3.1
+    container_name: traefik
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -45,5 +46,6 @@ services:
 
   whoami:
     image: containous/whoami
+    container_name: whoami
     labels:
       - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"

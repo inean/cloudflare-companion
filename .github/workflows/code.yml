@@ -1,0 +1,91 @@
+---
+name: Code CI
+
+on:
+
+  push:
+    branches: [ main ]
+
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python with Rye
+        uses: ./.github/actions/setup-python-with-rye
+
+      - name: Lint
+        run: rye run ruff check --output-format=github .
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python with Rye
+        uses: ./.github/actions/setup-python-with-rye
+
+      - name: Format
+        run: rye run ruff format . --check --diff
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }} with Rye
+        uses: ./.github/actions/setup-python-with-rye
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Pytest if directory exists
+        run:  rye run pytest --cov=src --cov-report=xml  --junitxml=junit.xml
+
+      - name: Upload test results to Codecov
+        if: ${{ !env.ACT  }}
+        uses: codecov/test-results-action@v1
+        with:
+          fail_ci_if_error: true
+          file: junit.xml
+          flags:  ${{ matrix.python-version }}
+          name: ${{ github.repository }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload Coverage files
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: tests
+    if: ${{ always() && ! cancelled() }}
+
+    steps:
+      - name: Download coverage.xml
+        uses: actions/download-artifact@v3
+        with:
+          name: coverage-xml
+          path: .
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: ${{ !env.ACT }}
+        with:
+          fail_ci_if_error: true
+          file: coverage.xml
+          flags: unittests
+          name: ${{ github.repository }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+

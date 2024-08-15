@@ -67,7 +67,7 @@ def report_current_status_and_settings(logger: logging.Logger, settings: Setting
             logger.error(f"Traefik polling disabled: Bad url: {settings.traefik_poll_url}")
 
     logger.debug(f"Docker Polling Mode: {'On' if settings.enable_docker_poll else 'Off'}")
-    logger.debug(f"Docker Poll Seconds: {settings.docker_poll_seconds}")
+    logger.debug(f"Docker Poll Seconds: {settings.docker_timeout_seconds}")
 
     for dom in settings.domains:
         logger.debug(f"Domain Configuration: {dom.name}")

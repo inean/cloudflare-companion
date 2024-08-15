@@ -10,9 +10,11 @@ T = TypeVar("T", bound=Callable)
 
 
 class EventEmitter(Generic[T]):
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: logging.Logger, *, name: str):
         self.logger = logger
-        self._subscribers: dict[T, tuple] = {}
+        self.logger_name = name
+        # Subscribers
+        self._subscribers: dict[T, tuple[asyncio.Queue, float, float]] = {}
 
     def __iter__(self) -> Iterator[tuple[T, tuple]]:
         return iter(self._subscribers.values())
@@ -28,10 +30,11 @@ class EventEmitter(Generic[T]):
             callback (Callable): The callback function to be called when an event is emitted.
             backoff (float): The backoff time in seconds to wait before calling the callback again.
         """
-        # Register subscriber
+        # Check if callback is already subscribed
         assert callback not in self._subscribers
         assert callable(callback)
-        self._subscribers.setdefault(callback, (asyncio.Queue(), backoff, time.time()))
+        # Register subscriber
+        self._subscribers[callback] = (asyncio.Queue(), backoff, time.time())
 
     def unsubscribe(self, callback: T):
         """
@@ -42,7 +45,7 @@ class EventEmitter(Generic[T]):
         """
         self._subscribers.pop(callback, None)
 
-    async def emit(self, timeout: float = 0):
+    async def emit(self, timeout: float | None = None):
         """
         Triggers an event and notifies all subscribers.
         Calls each subscriber's callback with the data.
@@ -52,14 +55,14 @@ class EventEmitter(Generic[T]):
             while not queue.empty():
                 current_time = time.time()
                 if current_time - last_called >= backoff:
+                    # Get callback function
+                    func = callback.__call__ if hasattr(callback, "__call__") else callback
+                    assert callable(func)
+                    # Get data from queue
                     data = await queue.get()
-                    if asyncio.iscoroutinefunction(callback):
-                        await callback(data)
-                    else:
-                        assert callable(callback)
-                        callback(data)
-                    # Update last called time
-                    return queue, backoff, current_time
+                    # Invoke
+                    await func(*data) if asyncio.iscoroutinefunction(func) else func(*data)
+                    return callback, (queue, backoff, current_time)
                 else:
                     # Wait for backoff time and try emit again
                     await asyncio.sleep(backoff - (current_time - last_called))
@@ -74,42 +77,27 @@ class EventEmitter(Generic[T]):
             for task in asyncio.as_completed(tasks, timeout=timeout):
                 callback, data = await task
                 self._subscribers[callback] = data
+
         except asyncio.TimeoutError:
-            self.logger.warning("Emit timeout reached.")
+            self.logger.warning(f"{self.logger_name}: Emit timeout reached.")
+            # Cancel all tasks
+            [task.cancel() for task in tasks]
+            asyncio.gather(*tasks, return_exceptions=True)
             pass
 
     # Data related methods
-    def set_data(self, data):
-        """
-        Sets the data for all subscribers.
+    def set_data(self, data, callback: T | None = None):
+        if callback is None:
+            for queue, _, _ in self._subscribers.values():
+                queue.put_nowait(data)
+            return
+        assert callback in self._subscribers
+        queue, _, _ = self._subscribers[callback]
+        queue.put_nowait(data)
 
-        Args:
-            data: The data to be set for subscribers.
-        """
-        for queue, _, _ in self._subscribers.values():
-            queue.put_nowait(data)
-
-    def has_data(self, callback: Callable):
-        """
-        Checks if there is data available for a specific subscriber.
-
-        Args:
-            callback (Callable): The callback function to check for data.
-
-        Returns:
-            bool: True if there is data available, False otherwise.
-        """
+    def has_data(self, callback: T):
         return callback in self._subscribers and not self._subscribers[callback][0].empty()
 
-    async def get_data(self, callback: Callable):
-        """
-        Gets the data for a specific subscriber.
-
-        Args:
-            callback (Callable): The callback function to get data for.
-
-        Returns:
-            The data for the specified callback.
-        """
-        if callback in self._subscribers:
-            return await self._subscribers[callback][0].get()
+    def get_data(self, callback: T):
+        queue, _, _ = self._subscribers.get(callback)
+        return queue.get_nowait()

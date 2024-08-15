@@ -47,14 +47,16 @@ class Settings(BaseSettings):
 
     # Docker Settings
     enable_docker_poll: bool = True
-    docker_poll_seconds: int = 5
+    docker_timeout_seconds: int = 5  # Timeout for requests based Docker client operations
+    docker_poll_seconds: int = 30  # Polling interval in seconds
 
     # Traefik Settings
     enable_traefik_poll: bool = False
     traefik_poll_url: str | None = None
-    traefik_poll_seconds: int = 5
-    traefik_filter_value: str | None = None
-    traefik_filter_label: str | None = None
+    traefik_poll_seconds: int = 30  # Polling interval in seconds
+    traefik_timeout_seconds: int = 5  # Timeout for blocking requests operations
+    traefik_filter_value: re.Pattern | None = None
+    traefik_filter_label: re.Pattern = re.compile("traefik.constraint")
     traefik_included_hosts: list[re.Pattern] = []
     traefik_excluded_hosts: list[re.Pattern] = []
 

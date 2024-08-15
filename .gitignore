@@ -11,7 +11,11 @@ wheels/
 .env
 requirements-dev.lock
 
-# Coverage reports
+# Coverage and test reports
 .coverage
 coverage.xml
 htmlcov/
+junit.xml
+
+# Github actions
+.secrets

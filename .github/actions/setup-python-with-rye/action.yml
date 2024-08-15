@@ -1,22 +1,44 @@
-name: Install Python with Rye
+---
+name: Setup Rye
+description: Install Python with Rye
 
 inputs:
   python-version:
     description: Python version
-    required: true
+    required: false
   rye-version:
     description: Rye version
     required: false
     default: "latest"
 
+outputs:
+  python-version:
+    description: The Python version to use
+    value: ${{ steps.compute-python-version.outputs.python-version }}
+
 runs:
   using: composite
   steps:
+      - name: Compute Python Version
+        id: compute-python-version
+        run: |
+          PYTHON_VERSION="${{ inputs.python-version }}"
+          if [ -z "$PYTHON_VERSION" ]; then
+            PYTHON_VERSION=$(cat .python-version)
+          fi
+          if [ -z "$PYTHON_VERSION" ]; then
+            echo "No Python version specified, and no .python-version file found"
+            exit 1
+          fi
+          echo "Python version specified: $PYTHON_VERSION"
+          echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+        shell: bash
+
       - name: Install Rye
-        uses: eifinger/setup-rye@v3
+        uses: eifinger/setup-rye@v4
         with:
           enable-cache: true
-          version: ${{ inputs.rye-version }}
+          cache-prefix: ${{ steps.compute-python-version.outputs.python-version }}
 
       - name: Set Rye Config
         run: |
@@ -24,12 +46,24 @@ runs:
           rye config --set-bool behavior.use-uv=true
         shell: bash
 
-      - name: Set up Python ${{ inputs.python-version }}
+      - name: Pin Python Version ${{ steps.compute-python-version.outputs.python-version }}
         run: |
           export PYTHONUNBUFFERED=True
-          rye pin ${{ inputs.python-version }}
+          rye pin ${{ steps.compute-python-version.outputs.python-version }}
         shell: bash
 
-      - name: Install Dependencies
-        run: rye sync
+      - name: Install dependencies
+        if: steps.setup-rye.outputs.cache-hit != 'true'
+        run: |
+          if [ -f requirements.lock ] && [ -f requirements-dev.lock ]; then
+            rye sync --no-lock
+          else
+            rye sync
+          fi
         shell: bash
+
+      - name: Cache pre-commit
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9  # v4.0.2
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-|${{ steps.compute-python-version.outputs.python-version }}|${{ hashFiles('.pre-commit-config.yaml') }}

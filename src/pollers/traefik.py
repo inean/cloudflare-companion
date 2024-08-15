@@ -9,6 +9,17 @@ from typing_extensions import override
 from pollers import DataPoller, PollerSource
 
 
+class TimeoutSession(requests.Session):
+    def __init__(self, *, timeout: float | None = None):
+        self.timeout = timeout
+        super().__init__()
+
+    def request(self, *args, **kwargs):
+        if "timeout" not in kwargs and self.timeout:
+            kwargs["timeout"] = self.timeout
+        return super().request(*args, **kwargs)
+
+
 class TraefikPoller(DataPoller[requests.Session]):
     config = DataPoller.config | {
         "source": "traefik",
@@ -19,7 +30,7 @@ class TraefikPoller(DataPoller[requests.Session]):
         super(TraefikPoller, self).__init__(
             logger,
             settings=settings,
-            client=client or requests.Session(),
+            client=client or TimeoutSession(timeout=settings.traefik_timeout_seconds),
         )
         # Computed from settings
         self.poll_sec = settings.traefik_poll_seconds
@@ -81,7 +92,7 @@ class TraefikPoller(DataPoller[requests.Session]):
     @async_backoff
     def fetch(self) -> tuple[list[str, PollerSource]]:
         try:
-            response = self.client.get(self.poll_url, timeout=self.poll_sec)
+            response = self.client.get(self.poll_url)
             response.raise_for_status()
         except requests.exceptions.RequestException as err:
             self.logger.error(f"Failed to fetch route from Traefik API: {err}")

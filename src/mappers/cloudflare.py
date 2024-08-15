@@ -37,12 +37,16 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
         self.dry_run = settings.dry_run
         self.rc_type = settings.rc_type
         self.refresh_entries = settings.refresh_entries
+        self.domains = settings.domains
 
         # Initialize the parent class
         super(CloudFlareMapper, self).__init__(logger, settings=settings, client=client)
 
-    async def __call__(self, *args, **kwargs):
-        return await self.sync(*args, **kwargs)
+    async def __call__(self, names: list[str], source: str):
+        result = []
+        for name in names:
+            result.append(await self.sync(name, source, self.domains))
+        return result
 
     async def get_records(self, zone_id: str, name: str):
         for retry in range(self.config["max_retries"]):
@@ -72,7 +76,7 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
             self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
 
     # Start Program to update the Cloudflare
-    async def sync(self, name, domain_infos: list[DomainsModel]):
+    async def sync(self, name: str, source, domain_infos: list[DomainsModel]):
         def is_domain_excluded(logger, name, dom: DomainsModel):
             for sub_dom in dom.excluded_sub_domains:
                 if f"{sub_dom}.{dom.name}" in name:

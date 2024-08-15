@@ -11,6 +11,7 @@ from pollers.docker import DockerContainer, DockerPoller
 def mock_settings():
     settings = MagicMock()
     settings.docker_poll_seconds = 10
+    settings.docker_timeout_seconds = 5
     settings.traefik_filter_label = "traefik.enable"
     settings.traefik_filter_value = "true"
     return settings

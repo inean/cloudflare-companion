@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from events import EventEmitter
@@ -122,9 +122,8 @@ async def test_stop(data_manager, mock_poller_infinity):
     assert len(data_manager.tasks) == 0
 
 
-@pytest.mark.asyncio
-async def test_aggregate_data(data_manager, mock_poller):
+def test_aggregate_data(data_manager, mock_poller):
     data_manager.add_poller(mock_poller, backoff=5.0)
-    mock_poller.events.get_data = AsyncMock(return_value={"key": "value"})
-    combined_data = await data_manager.aggregate_data()
-    assert combined_data == {"key": "value"}
+    mock_poller.events.get_data = Mock(return_value=(["value"], "source"))
+    combined_data = data_manager.aggregate_data()
+    assert combined_data == {"source": ["value"]}

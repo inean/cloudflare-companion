@@ -18,7 +18,7 @@ RUN PYTHONDONTWRITEBYTECODE=1 pip install --no-cache-dir -r requirements.lock
 COPY src .
 
 # Run the application:
-ENTRYPOINT ["cloudflare_companion.py"]
+ENTRYPOINT ["/app/cloudflare_companion.py"]
 
 # Use CMD to pass arguments to the application
-CMD ["version"]
+CMD ["--version"]

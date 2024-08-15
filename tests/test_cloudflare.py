@@ -52,7 +52,7 @@ async def test_update_zones_target_domain_match(
     mock_cloudflare, mock_settings, mock_domain_infos, mock_logger
 ):
     cf_zones = CloudFlareMapper(mock_logger, settings=mock_settings, client=mock_cloudflare)
-    result = await cf_zones.sync("target.example.com", mock_domain_infos)
+    result = await cf_zones.sync("target.example.com", "traefik", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.get.assert_not_called()
 
@@ -63,7 +63,7 @@ async def test_update_zones_excluded_domain(
 ):
     mock_domain_infos[0].excluded_sub_domains = ["sub"]
     cf_zones = CloudFlareMapper(mock_logger, settings=mock_settings, client=mock_cloudflare)
-    result = await cf_zones.sync("sub.example.com", mock_domain_infos)
+    result = await cf_zones.sync("sub.example.com", "traefik", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.get.assert_not_called()
 
@@ -74,7 +74,7 @@ async def test_update_zones_create_new_record(
 ):
     mock_cloudflare.zones.dns_records.get.return_value = []
     cf_zones = CloudFlareMapper(mock_logger, settings=mock_settings, client=mock_cloudflare)
-    result = await cf_zones.sync("new.example.com", mock_domain_infos)
+    result = await cf_zones.sync("new.example.com", "traefik", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.post.assert_called_once()
 
@@ -85,7 +85,7 @@ async def test_update_zones_update_existing_record(
 ):
     mock_cloudflare.zones.dns_records.get.return_value = [{"id": "record_id"}]
     cf_zones = CloudFlareMapper(mock_logger, settings=mock_settings, client=mock_cloudflare)
-    result = await cf_zones.sync("existing.example.com", mock_domain_infos)
+    result = await cf_zones.sync("existing.example.com", "traefik", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.put.assert_called_once()
 
@@ -101,7 +101,7 @@ async def test_update_zones_rate_limit_retry(
     ]
     cf_zones = CloudFlareMapper(mock_logger, settings=mock_settings, client=mock_cloudflare)
     with patch("asyncio.sleep", return_value=None):
-        result = await cf_zones.sync("rate_limited.example.com", mock_domain_infos)
+        result = await cf_zones.sync("rate_limited.example.com", "traefik", mock_domain_infos)
     assert result is True
     assert mock_cloudflare.zones.dns_records.get.call_count == 3
 
@@ -111,6 +111,6 @@ async def test_update_zones_dry_run(mock_cloudflare, mock_settings, mock_domain_
     mock_settings.dry_run = True
     mock_cloudflare.zones.dns_records.get.return_value = []
     cf_zones = CloudFlareMapper(mock_logger, settings=mock_settings, client=mock_cloudflare)
-    result = await cf_zones.sync("dryrun.example.com", mock_domain_infos)
+    result = await cf_zones.sync("dryrun.example.com", "traefik", mock_domain_infos)
     assert result is True
     mock_cloudflare.zones.dns_records.post.assert_not_called()
