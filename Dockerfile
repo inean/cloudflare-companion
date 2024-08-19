@@ -1,64 +1,24 @@
-ARG DISTRO="alpine"
-ARG DISTRO_VARIANT="3.20"
+ARG VARIANT=3.10
+FROM python:${VARIANT}-slim
 
-FROM docker.io/tiredofit/${DISTRO}:${DISTRO_VARIANT}
-LABEL maintainer="Dave Conroy (github.com/tiredofit)"
+LABEL url="https://github.com/inean/docker-traefik-cloudflare-companion/"
+LABEL image="ghcr.io/inean/traefik-cloudflare-companion"
+LABEL maintainer="Carlos Martín (github.com/inean)"
 
-ENV CONTAINER_ENABLE_MESSAGING=FALSE \
-    CONTAINER_ENABLE_SCHEDULING=FALSE \
-    CONTAINER_PROCESS_RUNAWAY_PROTECTOR=FALSE \
-    IMAGE_NAME="tiredofit/traefik-cloudflare-companion" \
-    IMAGE_REPO_URL="https://github.com/tiredofit/docker-traefik-cloudflare-companion/"
+# Set a Virtual env if needed
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-RUN source /assets/functions/00-container && \
-    set -x && \
-    addgroup -S -g 8080 tcc && \
-    adduser -D -S -s /sbin/nologin \
-            -h /dev/null \
-            -G tcc \
-            -g "tcc" \
-            -u 8080 tcc \
-            && \
-    \
-    package update && \
-    package upgrade && \
-    package install .tcc-build-deps \
-                cargo \
-                gcc \
-                libffi-dev \
-                musl-dev \
-                openssl-dev \
-                py-pip \
-                py3-setuptools \
-                py3-wheel \
-                python3-dev \
-                && \
-    \
-    package install .tcc-run-deps \
-                docker-py \
-                py3-beautifulsoup4 \
-                py3-certifi \
-                py3-chardet \
-                py3-idna \
-                py3-openssl \
-                py3-packaging \
-                py3-requests \
-                py3-soupsieve \
-                py3-urllib3 \
-                py3-websocket-client \
-                py3-yaml \
-                python3 \
-                && \
-    \
-    pip install --break-system-packages \
-            cloudflare==2.19.* \
-            get-docker-secret \
-            requests \
-            && \
-    \
-    package remove .tcc-build-deps && \
-    package cleanup && \
-    rm -rf /root/.cache \
-           /root/.cargo
+# Install dependencies:
+WORKDIR /app
+COPY requirements.lock ./
+RUN PYTHONDONTWRITEBYTECODE=1 pip install --no-cache-dir -r requirements.lock
 
-COPY install /
+COPY src .
+
+# Run the application:
+ENTRYPOINT ["/app/cloudflare_companion.py"]
+
+# Use CMD to pass arguments to the application
+CMD ["--version"]

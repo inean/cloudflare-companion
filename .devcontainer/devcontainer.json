@@ -1,0 +1,73 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options
+{
+    "name": "CloudFlare DNS Updater",
+    "shutdownAction": "stopCompose",
+    "workspaceFolder": "/workspace",
+
+    // Docker Compose Options
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "devcontainer",
+
+    "features": {
+        "ghcr.io/dhoeric/features/hadolint:1": { },
+        "ghcr.io/devcontainers/features/docker-outside-of-docker": {
+            "postCreateCommand": "sudo usermod -aG docker vscode"
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                // Python exrtensions
+                "charliermarsh.ruff",
+                "codezombiech.gitignore",
+                "exiasr.hadolint",
+                "kevinrose.vsc-python-indent",
+                "mosapride.zenkaku",
+                "ms-azuretools.vscode-docker",
+                "ms-python.python",
+                "ms-vscode-remote.remote-containers",
+                "njpwerner.autodocstring",
+                "shardulm94.trailing-spaces",
+                "usernamehw.errorlens",
+                "yzhang.markdown-all-in-one"
+
+                // Project related extensions
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+                "[python]": {
+                    "editor.codeActionsOnSave": {
+                        "source.fixAll": "explicit",
+                        "source.organizeImports": "explicit"
+                    },
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.formatOnSave": true,
+                    "editor.rulers": [
+                        88
+                    ]
+                },
+                "terminal.integrated.defaultProfile.linux": "zsh",
+                "terminal.integrated.profiles.linux": {
+                    "zsh": {
+                        "path": "/bin/zsh"
+                    }
+                }
+            }
+        }
+    },
+
+    // Forward traefik dashboard port
+    "forwardPorts": [ 8080 ],
+
+    // Use 'postCreateCommand' to run commands after the container is created.
+    "postCreateCommand": "rye sync -f",
+
+    // use 'postStartCommand' to run commands after the container is started.
+    "postStartCommand": "which git && rye run pre-commit install",
+
+    // Run vscode-server as non-root user
+    "containerUser": "vscode"
+
+    // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+    //"remoteUser": "root"
+}

@@ -1,0 +1,51 @@
+---
+version: '3.8'
+name: "cloudflare-updater"
+services:
+  devcontainer:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ..:/workspace:cached
+    cap_add:
+      - SYS_ADMIN
+      - AUDIT_WRITE
+    security_opt:
+      - seccomp=unconfined
+      - label=disable
+      - apparmor=unconfined
+    depends_on:
+      - traefik
+      - whoami
+    # Override the default command so things don't shut down after the process ends.
+    command: sleep infinity
+    labels:
+      - "traefik.enable=false"
+
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "8080:8080"
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - label=disable
+      - apparmor=unconfined
+
+  whoami:
+    image: containous/whoami
+    container_name: whoami
+    labels:
+      - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"

@@ -1,0 +1,40 @@
+[project]
+authors = [
+    { name = "Carlos Martín", email = "inean.es@gmail.com" },
+]
+dependencies = [
+    "cloudflare == 2.19.*",
+    "docker>=7.1.0",
+    "pydantic-settings>=2.3.4",
+    "pydantic-settings-file-envar>=0.1.0",
+    "asyncio>=3.4.3",
+    "python-dotenv>=1.0.1",
+]
+description = "This will build a Docker image to automatically update Cloudflare DNS records upon container start when using Traefik as a Reverse Proxy"
+name = "cloudflare-companion"
+readme = "README.md"
+requires-python = ">= 3.10"
+version = "0.1.0"
+
+[tool.rye]
+dev-dependencies = [
+    "pre-commit>=3.7.1",
+    "ruff>=0.5.4",
+    "pytest>=8.3.2",
+    "pytest-asyncio>=0.23.8",
+    "pytest-cov>=5.0.0",
+    "toml>=0.10.2",
+]
+managed = true
+virtual = true
+
+[tool.hatch.version]
+path = "src/__about__.py"
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "src",
+]
+
+[tool.ruff]
+line-length = 100
