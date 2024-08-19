@@ -3,13 +3,13 @@ from unittest.mock import MagicMock, patch
 
 import CloudFlare
 import pytest
-from cloudflare_companion import CloudFlareMapper, Settings
-from settings import DomainsModel
+from dns_synchub.mappers import CloudFlareMapper, Settings
+from dns_synchub.settings import DomainsModel
 
 
 @pytest.fixture
 def mock_logger():
-    logger = logging.getLogger("cloudflare_companion")
+    logger = logging.getLogger("dns_synchub")
     return logger
 
 

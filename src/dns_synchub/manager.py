@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from events import EventEmitter
-from mappers import Mapper
-from pollers import Poller, PollerSource
+from .events import EventEmitter
+from .mappers import Mapper
+from .pollers import Poller, PollerSource
 
 
 class DataManager:

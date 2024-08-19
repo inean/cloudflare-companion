@@ -4,10 +4,10 @@ import asyncio
 
 from CloudFlare import CloudFlare
 from CloudFlare import exceptions as CloudFlareExceptions
-from settings import DomainsModel, Settings
+from dns_synchub.settings import DomainsModel, Settings
 from typing_extensions import deprecated
 
-from mappers import DataMapper, MapperConfig
+from dns_synchub.mappers import DataMapper, MapperConfig
 
 
 class CloudFlareException(Exception):

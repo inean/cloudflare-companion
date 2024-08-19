@@ -11,10 +11,13 @@ dependencies = [
     "python-dotenv>=1.0.1",
 ]
 description = "This will build a Docker image to automatically update Cloudflare DNS records upon container start when using Traefik as a Reverse Proxy"
-name = "cloudflare-companion"
+name = "dns-synchub"
 readme = "README.md"
 requires-python = ">= 3.10"
 version = "0.1.0"
+
+[project.scripts]
+dns-synchub = "dns_synchub:main"
 
 [tool.rye]
 dev-dependencies = [
@@ -27,9 +30,6 @@ dev-dependencies = [
 ]
 managed = true
 virtual = true
-
-[tool.hatch.version]
-path = "src/__about__.py"
 
 [tool.pytest.ini_options]
 pythonpath = [

@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from typing import Any, Generic, Literal, TypedDict, TypeVar
 from weakref import ref as WeakRef
 
-from events import EventEmitter
-from settings import Settings
+from dns_synchub.events import EventEmitter
+from dns_synchub.settings import Settings
 from typing_extensions import override
 
 
@@ -120,8 +120,8 @@ class DataPoller(Poller, Generic[T]):
 
 # ruff: noqa: E402
 
-from pollers.docker import DockerPoller
-from pollers.traefik import TraefikPoller
+from dns_synchub.pollers.docker import DockerPoller
+from dns_synchub.pollers.traefik import TraefikPoller
 
 # run: enable
 

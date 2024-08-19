@@ -5,7 +5,7 @@ from typing import Literal
 # - _FIELD  like env vars
 # -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
 #
-from internal._settings import _EnvSettingsSource
+from .internal._settings import _EnvSettingsSource
 from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
 from typing_extensions import Self

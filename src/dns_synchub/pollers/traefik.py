@@ -2,11 +2,11 @@ import asyncio
 import re
 
 import requests
-from internal._decorators import BackoffError, async_backoff
-from settings import Settings
+from dns_synchub.internal._decorators import BackoffError, async_backoff
+from dns_synchub.settings import Settings
 from typing_extensions import override
 
-from pollers import DataPoller, PollerSource
+from dns_synchub.pollers import DataPoller, PollerSource
 
 
 class TimeoutSession(requests.Session):

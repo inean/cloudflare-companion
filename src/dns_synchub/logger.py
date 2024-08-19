@@ -4,7 +4,7 @@ import logging
 import re
 import sys
 
-from settings import Settings
+from .settings import Settings
 
 logger = None
 

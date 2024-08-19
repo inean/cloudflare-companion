@@ -8,7 +8,7 @@
             "name": "Run with local .env file",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/src/cloudflare_companion.py",
+            "program": "${workspaceFolder}/src/dns_synchub.py",
             "console": "integratedTerminal",
             "args": [ "--env-file", "${workspaceFolder}/.env" ],
             "justMyCode": false

@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 # Assuming the function check_container_t2 is imported from the module
-from cloudflare_companion import check_container_t2
-from pollers.docker import DockerContainer, DockerPoller
+from dns_synchub.cli import check_container_t2
+from dns_synchub.pollers.docker import DockerContainer, DockerPoller
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def mock_docker_poller_cls(mock_containers):
     def mock_is_enabled(container):
         return next(iter(container.labels.values()))
 
-    with patch("cloudflare_companion.DockerPoller", autospec=True) as MockDockerPoller:
+    with patch("dns_synchub.pollers.DockerPoller", autospec=True) as MockDockerPoller:
         mock_object = Mock(spec=DockerPoller)
         mock_object.fetch = AsyncMock(return_value=mock_containers)
 

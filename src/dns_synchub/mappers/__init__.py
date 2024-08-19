@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypedDict, TypeVar
 
-from settings import Settings
+from dns_synchub.settings import Settings
 
 
 class MapperConfig(TypedDict, total=False):
@@ -44,6 +44,6 @@ class DataMapper(Mapper, Generic[T]):
         self.excluded_hosts = settings.traefik_excluded_hosts
 
 
-from mappers.cloudflare import CloudFlareMapper  # noqa: E402
+from dns_synchub.mappers.cloudflare import CloudFlareMapper  # noqa: E402
 
 __all__ = ["CloudFlareMapper"]

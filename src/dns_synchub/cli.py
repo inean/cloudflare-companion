@@ -1,26 +1,18 @@
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
-import argparse
 import asyncio
 import logging
 import re
-import sys
 from datetime import datetime
 from typing import TypedDict
 
 import docker
 import docker.errors
-import logger as logger
 import requests
-from __about__ import __version__ as VERSION
-from dotenv import load_dotenv
-from manager import DataManager
-from mappers import CloudFlareMapper
-from pollers import DockerPoller, PollerSource, TraefikPoller
-from pydantic import ValidationError
-from settings import Settings
+from .manager import DataManager
+from .mappers import CloudFlareMapper
+from .pollers import DockerPoller, PollerSource, TraefikPoller
+from .settings import Settings
 from typing_extensions import deprecated
 
 
@@ -325,40 +317,3 @@ async def main(log: logging.Logger, *, settings: Settings):
 
     # Start manager
     await manager.start()
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Cloudflare Companion")
-    parser.add_argument("--env-file", type=str, help="Path to the .env file")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    try:
-        # Load settings
-        args = parse_args()
-        # Load environment variables from the specified env file
-        args.env_file and load_dotenv(args.env_file)
-
-        settings = Settings()
-
-        # Check for uppercase docker secrets or env variables
-        assert settings.cf_token
-        assert settings.target_domain
-        assert len(settings.domains) > 0
-
-    except ValidationError as e:
-        print(f"Unable to load settings: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # Set up logging and dump runtime settings
-    log = logger.report_current_status_and_settings(logger.get_logger(settings), settings)
-    try:
-        asyncio.run(main(log, settings=settings))
-        # asyncio.run(legacy_main(log, settings=settings))
-    except KeyboardInterrupt:
-        # asyncio.run will cancel any task pending when the main function exits
-        log.info("Cancel by user.")
-        log.info("Exiting...")
-        sys.exit(1)

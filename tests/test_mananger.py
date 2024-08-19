@@ -3,10 +3,10 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from events import EventEmitter
-from manager import DataManager
-from mappers import Mapper
-from pollers import Poller
+from dns_synchub.events import EventEmitter
+from dns_synchub.manager import DataManager
+from dns_synchub.mappers import Mapper
+from dns_synchub.pollers import Poller
 
 
 @pytest.fixture

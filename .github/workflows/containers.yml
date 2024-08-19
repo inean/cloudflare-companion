@@ -33,6 +33,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Extract Python Version
+        id: extract-python-version
+        uses: ./.github/actions/extract-python-version
+
       - name: Build
         uses: docker/build-push-action@v6
         with:
@@ -40,6 +44,9 @@ jobs:
           load: true
           file: ./Dockerfile
           tags: ${{ github.repository }}:latest
+          build-args: |
+            REPOSITORY=${{ github.repository }}
+            PYTHON_VERSION=${{ steps.extract-python-version.outputs.python-version }}
 
       - name: Test Image
         run: |

@@ -7,7 +7,7 @@ import sys
 import toml
 
 TOML_FILE = "pyproject.toml"
-DATA_FILE = "src/__about__.py"
+DATA_FILE = "src/dns_synchub/__about__.py"
 
 
 def update_version(toml_file=None, data_file=None):

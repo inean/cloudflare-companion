@@ -3,13 +3,13 @@ import re
 from unittest.mock import MagicMock, patch
 
 import pytest
-from cloudflare_companion import check_traefik
-from settings import Settings
+from dns_synchub.cli import check_traefik
+from dns_synchub.settings import Settings
 
 
 @pytest.fixture
 def mock_logger():
-    logger = logging.getLogger("cloudflare_companion")
+    logger = logging.getLogger("dns_synchub")
     return logger
 
 
