@@ -1,19 +1,19 @@
-# github.com/tiredofit/docker-traefik-cloudflare-companion
+# [DNS SncHub](github.com/inean/dns-synchub)
 
-[![GitHub release](https://img.shields.io/github/v/tag/tiredofit/docker-traefik-cloudflare-companion?style=flat-square)](https://github.com/tiredofit/docker-traefik-cloudflare-companion/releases/latest)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/tiredofit/docker-traefik-cloudflare-companionmain.yml?branch=main&style=flat-square)](https://github.com/tiredofit/docker-traefik-cloudflare-companion.git/actions)
-[![Docker Stars](https://img.shields.io/docker/stars/tiredofit/traefik-cloudflare-companion.svg?style=flat-square&logo=docker)](https://hub.docker.com/r/tiredofit/traefik-cloudflare-companion/)
-[![Docker Pulls](https://img.shields.io/docker/pulls/tiredofit/traefik-cloudflare-companion.svg?style=flat-square&logo=docker)](https://hub.docker.com/r/tiredofit/traefik-cloudflare-companion/)
-[![Become a sponsor](https://img.shields.io/badge/sponsor-tiredofit-181717.svg?logo=github&style=flat-square)](https://github.com/sponsors/tiredofit)
-[![Paypal Donate](https://img.shields.io/badge/donate-paypal-00457c.svg?logo=paypal&style=flat-square)](https://www.paypal.me/tiredofit)
+[![GitHub Container Registry](https://img.shields.io/badge/GitHub%20Container%20Registry-available-brightgreen?style=flat-square&logo=github)](https://github.com/inean/dns-synchub/pkgs/container/dns-synchub)
+[![CI](https://github.com/inean/dns-synchub/actions/workflows/containers.yml/badge.svg)](https://github.com/inean/dns-synchub/actions/workflows/containers.yml)
+[![codecov](https://codecov.io/github/inean/dns-synchub/graph/badge.svg?token=LHEA7AKBW0)](https://codecov.io/github/inean/dns-synchub)
+[![Mergify Status](https://img.shields.io/endpoint.svg?url=https://api.mergify.com/v1/badges/inean/dns-synchub&style=flat-square)](https://mergify.io)
 
 ## About
 
-This will build a Docker image to automatically update [Cloudflare](https://www.cloudflare.com/) DNS records upon container start when using [Traefik](https://github.com/traefik/traefik) as a Reverse Proxy.
+This project builds a container image to automatically update zone providers (currently only [Cloudflare](https://www.cloudflare.com/) DNS records) upon container start when using [Traefik](https://github.com/traefik/traefik) as a reverse proxy.
+
+This work is a rewrite of [docker-traefik-cloudflare-companion](https://github.com/tiredofit/docker-traefik-cloudflare-companion), maintained by [Dave Conroy](https://github.com/tiredofit/).
 
 ## Maintainer
 
-- [Dave Conroy](http://github/tiredofit/)
+- [Carlos Martín](https:/github.com/inean)
 
 ## Table of Contents
 
@@ -54,74 +54,86 @@ This will build a Docker image to automatically update [Cloudflare](https://www.
 - [References](#references)
 
 ## Prerequisites and Assumptions
-*  Assumes you have either a Global or a Scoped API key from Cloudflare.
-*  Assumes you are using Traefik as a reverse proxy:
-   *  [Traefik](https://github.com/tiredofit/docker-traefik)
+
+- Requires a [Scoped API key](https://developers.cloudflare.com/api/tokens/create) or a [Global API key](https://support.cloudflare.com/hc/en-us/articles/200167836-Managing-API-Tokens-and-Keys#12345680) from Cloudflare. The Scoped API key allows for more granular permissions, while the Global API key provides full access to your [Cloudflare](https://www.cloudflare.com/) account.
+
+- Requires [Traefik](https://traefik.io/) v2.0 or later as a reverse proxy. Traefik is a modern HTTP reverse proxy and load balancer that simplifies deploying microservices.
+
+- Supports only [Docker Engine](https://www.docker.com/products/docker-engine) or compatible (e.g., [Podman](https://podman.io/)). Docker Engine is the industry-leading container runtime, and Podman is a daemonless container engine for developing, managing, and running OCI Containers on your Linux system.
 
 ## Installation
-### Build from Source
-Clone this repository and build the image with `docker build -t (imagename) .`
 
-### Prebuilt Images
-Builds of the image are available on [Docker Hub](https://hub.docker.com/r/tiredofit/traefik-cloudflare-companion)
+### Build from Source
+
+Clone this repository and build the container image using the following command:
 
 ```bash
-docker pull docker.io/tiredofit/traefik-cloudflare-companion:(imagetag)
+docker build -t <imagename> .
 ```
-Builds of the image are also available on the [Github Container Registry](https://github.com/tiredofit/docker-traefik-cloudflare-companion/pkgs/container/docker-traefik-cloudflare-companion)
 
-```
-docker pull ghcr.io/tiredofit/docker-traefik-cloudflare-companion:(imagetag)
+### Prebuilt Images
+
+Builds of the image are available on the [Github Container Registry](https://github.com/inean/dns-synchub/pkgs/container/dns-synchub)
+
+```bash
+docker pull ghcr.io/inean/dns-synchub:(imagetag)
 ```
 
 The following image tags are available along with their tagged release based on what's written in the [Changelog](CHANGELOG.md):
 
-| Container OS | Tag       |
-| ------------ | --------- |
-| Alpine       | `:latest` |
+| Container OS           | Tag       |
+| ---------------------- | --------- |
+| python-`<version>`-slim  | `:latest` |
 
-#### Multi Architecture
-Images are built primarily for `amd64` architecture, and may also include builds for `arm/v6`, `arm/v7`, `arm64` and others. These variants are all unsupported. Consider [sponsoring](https://github.com/sponsors/tiredofit) my work so that I can work with various hardware. To see if this image supports multiple architecures, type `docker manifest (image):(tag)`
+The current Python version is specified in the `.python-version` file.
+
+#### Multi-Architecture Support
+
+Images are primarily tested on `arm64` architecture. Currently, the available architectures are `arm64` and `amd64`. Other variants, if available, are unsupported. To verify multi-architecture support for this image, use the command: `docker manifest inspect <image>:<tag>`.
 
 ## Configuration
 
 ### Quick Start
 
-* The quickest way to get started is using [docker-compose](https://docs.docker.com/compose/). See the examples folder for a working [compose.yml](examples/compose.yml) that can be modified for development or production use.
+- The quickest way to get started is using [docker-compose](https://docs.docker.com/compose/). See the examples folder for a working [compose.yml](examples/compose.yml) that can be modified for development or production use.
 
-* Set various [environment variables](#environment-variables) to understand the capabilities of this image.
+- Set various [environment variables](#environment-variables) to understand the capabilities of this image.
 
 Upon startup the image looks for a label containing `traefik.frontend.rule` (version 1) or `Host*` (version2) from your running containers of either updates Cloudflare with a CNAME record of your `TARGET_DOMAIN`. Previous versions of this container used to only update one Zone, however with the additional of the `DOMAIN` environment variables it now parses the containers variables and updates the appropriate zone.
 
 For those wishing to assign multiple CNAMEs to a container use the following format:
 
 - Traefik 1.x
+
 ````bash
   - traefik.normal.frontend.rule=Host:example1.domain.tld,example2.domain.tld
 ````
 
 - Traefik 2.x
+
 ````bash
   - traefik.http.routers.example.rule=Host(`example1.domain.tld`) || Host(`example2.domain.tld`)
 ````
 
 ### Persistent Storage
+
 | File                   | Description                                                              |
 | ---------------------- | ------------------------------------------------------------------------ |
 | `/var/run/docker.sock` | You must have access to the docker socket in order to utilize this image |
 
 * * *
+
 ### Environment Variables
 
 #### Base Images used
 
-This image relies on an [Alpine Linux](https://hub.docker.com/r/tiredofit/alpine) base image that relies on an [init system](https://github.com/just-containers/s6-overlay) for added capabilities. Outgoing SMTP capabilities are handlded via `msmtp`. Individual container performance monitoring is performed by [zabbix-agent](https://zabbix.org). Additional tools include: `bash`,`curl`,`less`,`logrotate`, `nano`.
+This image relies on an [Alpine Linux](https://hub.docker.com/r/inean/alpine) base image that relies on an [init system](https://github.com/just-containers/s6-overlay) for added capabilities. Outgoing SMTP capabilities are handlded via `msmtp`. Individual container performance monitoring is performed by [zabbix-agent](https://zabbix.org). Additional tools include: `bash`,`curl`,`less`,`logrotate`, `nano`.
 
 Be sure to view the following repositories to understand all the customizable options:
 
-| Image                                                  | Description                            |
-| ------------------------------------------------------ | -------------------------------------- |
-| [OS Base](https://github.com/tiredofit/docker-alpine/) | Customized Image based on Alpine Linux |
+| Image                                              | Description                            |
+| -------------------------------------------------- | -------------------------------------- |
+| [OS Base](https://github.com/inean/docker-alpine/) | Customized Image based on Alpine Linux |
 
 #### Container Options
 
@@ -150,7 +162,7 @@ Be sure to view the following repositories to understand all the customizable op
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | `CF_EMAIL`                     | Email address tied to Cloudflare Account - Leave Blank for Scoped API                                                                                |         |
 | `CF_TOKEN`                     | API Token for the Domain                                                                                                                             |         |
-| `RC_TYPE`                      | Record Type for The Cloudflare e.g. `A;CNAME;AAAA`                                                                                                   |  CNAME  |
+| `RC_TYPE`                      | Record Type for The Cloudflare e.g. `A;CNAME;AAAA`                                                                                                   | CNAME   |
 | `TARGET_DOMAIN`                | Destination Hostname/IP to forward records to e.g. `host.example.com or 172.30.0.1`                                                                  |         |
 | `DOMAIN1`                      | Domain 1 you wish to update records for.                                                                                                             |         |
 | `DOMAIN1_ZONE_ID`              | Domain 1 Zone ID from Cloudflare                                                                                                                     |         |
@@ -180,7 +192,6 @@ Be sure to view the following repositories to understand all the customizable op
 | `TRAEFIK_EXCLUDED_HOST1`   | (optional) If using Traefik Polling mode - Regex patterns for hosts to exclude   |                      |
 | `TRAEFIK_EXCLUDED_HOST...` | (optional traefik host exclude pattern 2 - N)                                    |                      |
 | `REFRESH_ENTRIES`          | If record exists, update entry with new values `TRUE` or `FALSE`                 | `FALSE`              |
-
 
 #### Docker Secrets
 
@@ -252,7 +263,7 @@ In your serving container:
 ````
 services:
   nginx:
-    image: tiredofit/nginx:latest
+    image: inean/nginx:latest
     deploy:
       labels:
         - traefik.enable=true
@@ -261,8 +272,8 @@ services:
         - traefik.constraint=proxy-public
 ````
 
-
 ## Maintenance
+
 ### Shell Access
 
 For debugging and maintenance purposes you may want access the containers shell.
@@ -274,26 +285,32 @@ docker exec -it (whatever your container name is e.g. traefik-cloudflare-compani
 ## Support
 
 These images were built to serve a specific need in a production environment and gradually have had more functionality added based on requests from the community.
+
 ### Usage
+
 - The [Discussions board](../../discussions) is a great place for working with the community on tips and tricks of using this image.
-- [Sponsor me](https://tiredofit.ca/sponsor) for personalized support.
+- [Sponsor me](https://inean.ca/sponsor) for personalized support.
 
 ### Bugfixes
+
 - Please, submit a [Bug Report](issues/new) if something isn't working as expected. I'll do my best to issue a fix in short order.
 
 ### Feature Requests
+
 - Feel free to submit a feature request, however there is no guarantee that it will be added, or at what timeline.
-- [Sponsor me](https://tiredofit.ca/sponsor) regarding development of features.
+- [Sponsor me](https://inean.ca/sponsor) regarding development of features.
 
 ### Updates
+
 - Best effort to track upstream changes, More priority if I am actively using the image in a production environment.
-- [Sponsor me](https://tiredofit.ca/sponsor) for up to date releases.
+- [Sponsor me](https://inean.ca/sponsor) for up to date releases.
 
 ## License
+
 MIT. See [LICENSE](LICENSE) for more details.
 
 ## References
 
-* https://www.cloudflare.com
-* https://github.com/tiredofit/docker-traefik-cloudflare-companion
-* https://github.com/code5-lab/dns-flare
+- <https://www.cloudflare.com>
+- <https://github.com/inean/dns-synchub>
+- <https://github.com/code5-lab/dns-flare>

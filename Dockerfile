@@ -1,7 +1,7 @@
 ARG VARIANT=3.10
 FROM python:${VARIANT}-slim
 
-LABEL url="https://github.com/inean/docker-traefik-cloudflare-companion/"
+LABEL url="https://github.com/inean/dns-synchub/"
 LABEL image="ghcr.io/inean/traefik-cloudflare-companion"
 LABEL maintainer="Carlos Martín (github.com/inean)"
 
