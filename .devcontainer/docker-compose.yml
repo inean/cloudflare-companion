@@ -1,6 +1,6 @@
 ---
 version: '3.8'
-name: "cloudflare-updater"
+name: "dns-synchub"
 services:
   devcontainer:
     build:
