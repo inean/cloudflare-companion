@@ -4,10 +4,10 @@ import asyncio
 
 from CloudFlare import CloudFlare
 from CloudFlare import exceptions as CloudFlareExceptions
-from dns_synchub.settings import DomainsModel, Settings
 from typing_extensions import deprecated
 
 from dns_synchub.mappers import DataMapper, MapperConfig
+from dns_synchub.settings import DomainsModel, Settings
 
 
 class CloudFlareException(Exception):
@@ -24,11 +24,10 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
         if client is None:
             assert settings.cf_token is not None
             client = CloudFlare(
-                email=settings.cf_email,
                 token=settings.cf_token,
                 debug=settings.log_level.upper() == "VERBOSE",
             )
-            logger.debug(f"CloudFlare API Mode: {'Scoped' if not settings.cf_email else 'Global'}")
+            logger.debug("CloudFlare Scoped API client started")
 
         # Set up the client and logger
         self.client = client

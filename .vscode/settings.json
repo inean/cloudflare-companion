@@ -12,5 +12,9 @@
         "tests"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "debugpy.debugJustMyCode": false,
+    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.diagnosticMode": "workspace",
 }

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 class BackoffInstance(Protocol):
@@ -12,13 +12,18 @@ class BackoffInstance(Protocol):
 class BackoffError(Exception): ...
 
 
-def async_backoff(func=None, *, backoff: int | None = None, attempts: int | None = None):
-    def decorator(func):
+def retry(
+    func: Callable[..., Any] | None = None,
+    *,
+    backoff: int | None = None,
+    attempts: int | None = None,
+):
+    def decorator(func: Callable[..., Any]):
         # We can't use a WeakKeyDictionary to store the backoff state
         # for each instance because the instance is not hashable. Use id instead.
-        backoffs: dict[int, dict] = {}
+        backoffs: dict[int, dict[str, Any]] = {}
 
-        async def async_wrapper(instance: BackoffInstance, *args, **kwargs):
+        async def async_wrapper(instance: BackoffInstance, *args: Any, **kwargs: dict[str, Any]):
             max_retries = attempts if attempts is not None else instance.config["max_retries"]
             backoff_time = backoff if backoff is not None else instance.config["backoff_factor"]
 
@@ -32,9 +37,9 @@ def async_backoff(func=None, *, backoff: int | None = None, attempts: int | None
                 },
             )
             state = backoffs[id(instance)]
+            # Init response so it's available in finally block
+            response = None
             try:
-                # Init response so it's available in finally block
-                response = None
                 # Fetch timers
                 current_time = time.time()
                 invoked_time = state["last_call_time"]

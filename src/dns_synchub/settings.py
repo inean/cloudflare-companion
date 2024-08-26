@@ -1,27 +1,39 @@
 import re
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, BeforeValidator, model_validator
+from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
+from typing_extensions import Self
 
 # Inject custom methods into EventSettingsSource tu get support for:
 # - _FIELD  like env vars
 # -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
 #
 from .internal._settings import _EnvSettingsSource
-from pydantic import BaseModel, field_validator, model_validator
-from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
-from typing_extensions import Self
 
-EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value
-EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars
+EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value  # type:ignore
+EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars  # type:ignore
 
 # Define the type alias
 RecordType = Literal["A", "AAAA", "CNAME"]
+
+
+def validate_ttl(value: int | Literal["auto"]) -> int | Literal["auto"]:
+    if isinstance(value, int) and value >= 30:
+        return value
+    if value != "auto":
+        return value
+    raise ValueError("TTL must be at least 30 seconds or 'auto'")
+
+
+TTLType = Annotated[int | str, BeforeValidator(validate_ttl)]
 
 
 class DomainsModel(BaseModel):
     name: str
     zone_id: str
     proxied: bool = True
-    ttl: int | None = None
+    ttl: TTLType | None = None
     target_domain: str | None = None
     comment: str | None = None
     rc_type: RecordType | None = None
@@ -45,6 +57,8 @@ class Settings(BaseSettings):
     log_type: str = "BOTH"
     refresh_entries: bool = False
 
+    # Poller Common settings
+
     # Docker Settings
     enable_docker_poll: bool = True
     docker_timeout_seconds: int = 5  # Timeout for requests based Docker client operations
@@ -55,42 +69,38 @@ class Settings(BaseSettings):
     traefik_poll_url: str | None = None
     traefik_poll_seconds: int = 30  # Polling interval in seconds
     traefik_timeout_seconds: int = 5  # Timeout for blocking requests operations
-    traefik_filter_value: re.Pattern | None = None
-    traefik_filter_label: re.Pattern = re.compile("traefik.constraint")
-    traefik_included_hosts: list[re.Pattern] = []
-    traefik_excluded_hosts: list[re.Pattern] = []
+    docker_filter_value: re.Pattern | None = None
+    docker_filter_label: re.Pattern | None = None
 
-    # Cloudflare Settings
-    cf_token: str
-    cf_email: str | None = None  # If not set, we are using scoped API
-
-    # Cloudflare Default DNS Settings
+    # Mapper Settings
     target_domain: str | None = None
-    default_ttl: int = 1
+    zone_id: str | None = None
+    default_ttl: TTLType = "auto"
     proxied: bool = True
     rc_type: RecordType = "CNAME"
 
-    domains: list[DomainsModel] = []
+    included_hosts: list[re.Pattern] = []
+    excluded_hosts: list[re.Pattern] = []
 
-    @field_validator("default_ttl", mode="before")
-    def validate_ttl(cls, value):
-        if value != 1 and value < 30:
-            raise ValueError("TTL must be at least 30 seconds or 1 to auto")
-        return value
+    # Cloudflare Settings
+    cf_token: str | None = None
+    cf_sync_interval: int = 300  # Sync interval in seconds
+
+    domains: list[DomainsModel] = []
 
     @model_validator(mode="after")
     def update_domains(self) -> Self:
         for dom in self.domains:
-            dom.ttl = self.validate_ttl(dom.ttl or self.default_ttl)
+            dom.ttl = dom.ttl or self.default_ttl
             dom.target_domain = dom.target_domain or self.target_domain
             dom.rc_type = dom.rc_type or self.rc_type
             dom.proxied = dom.proxied or self.proxied
         return self
 
     @model_validator(mode="after")
-    def update_traefik_domains(self) -> Self:
-        if len(self.traefik_included_hosts) == 0:
-            self.traefik_included_hosts.append(re.compile(".*"))
+    def add_default_include_host(self) -> Self:
+        if len(self.included_hosts) == 0:
+            self.included_hosts.append(re.compile(".*"))
         return self
 
     @model_validator(mode="after")
@@ -98,3 +108,9 @@ class Settings(BaseSettings):
         if self.enable_traefik_poll and not self.traefik_poll_url:
             raise ValueError("Traefik Polling is enabled but no URL is set")
         return self
+
+    @model_validator(mode="after")
+    def enforce_tokens(self) -> Self:
+        if self.dry_run or self.cf_token:
+            return self
+        raise ValueError("Missing Cloudflare API token. Provide it or enable dry-run mode.")

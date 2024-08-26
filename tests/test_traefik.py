@@ -3,7 +3,6 @@ import re
 from unittest.mock import MagicMock, patch
 
 import pytest
-from dns_synchub.cli import check_traefik
 from dns_synchub.settings import Settings
 
 

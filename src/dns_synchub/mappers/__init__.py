@@ -40,8 +40,8 @@ class DataMapper(Mapper, Generic[T]):
 
         # Computed from settings
         self.domains = settings.domains
-        self.included_hosts = settings.traefik_included_hosts
-        self.excluded_hosts = settings.traefik_excluded_hosts
+        self.included_hosts = settings.included_hosts
+        self.excluded_hosts = settings.excluded_hosts
 
 
 from dns_synchub.mappers.cloudflare import CloudFlareMapper  # noqa: E402

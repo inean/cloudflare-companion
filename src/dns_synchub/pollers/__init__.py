@@ -8,24 +8,10 @@ from datetime import datetime, timedelta
 from typing import Any, Generic, Literal, TypedDict, TypeVar
 from weakref import ref as WeakRef
 
-from dns_synchub.events import EventEmitter
-from dns_synchub.settings import Settings
 from typing_extensions import override
 
-
-class PollerEventEmitter(EventEmitter[Callable]):
-    def __init__(self, logger: logging.Logger, *, poller: Poller):
-        self.poller = WeakRef(poller)
-        super(PollerEventEmitter, self).__init__(logger, name=poller.config["source"])
-
-    # Event related methods
-    @override
-    async def subscribe(self, callback: Callable, backoff: float = 0):
-        # Register subscriber
-        await super(PollerEventEmitter, self).subscribe(callback, backoff=backoff)
-        # Fetch data and store locally if required
-        self.set_data(await self.poller().fetch(), callback=callback)
-
+from dns_synchub.events import EventEmitter
+from dns_synchub.settings import Settings
 
 PollerSource = Literal["manual", "docker", "traefik"]
 
@@ -37,6 +23,23 @@ class PollerConfig(TypedDict, total=False):
     """Factor to multiply the backoff time by"""
     source: PollerSource
     """The source of the poller"""
+
+
+class PollerEvents(EventEmitter[Callable]):
+    def __init__(self, logger: logging.Logger, *, poller: Poller):
+        self.poller = WeakRef(poller)
+        assert "source" in poller.config
+        super(PollerEvents, self).__init__(logger, name=poller.config["source"])
+
+    # Event related methods
+    @override
+    async def subscribe(self, callback: Callable, backoff: float = 0):
+        # Register subscriber
+        await super(PollerEvents, self).subscribe(callback, backoff=backoff)
+        # Fetch data and store locally if required
+        poller = self.poller()
+        assert isinstance(poller, Poller)
+        self.set_data(await poller.fetch(), callback=callback)
 
 
 class Poller(ABC):
@@ -54,7 +57,7 @@ class Poller(ABC):
             client (Any): The client instance for making requests.
         """
         self.logger = logger
-        self.events = PollerEventEmitter(logger, poller=self)
+        self.events = PollerEvents(logger, poller=self)
 
     # Poller methods
     @abstractmethod
@@ -66,14 +69,10 @@ class Poller(ABC):
         pass
 
     @abstractmethod
-    async def _watch(self, *, timeout: float | None = None):
+    async def _watch(self):
         """
         Abstract method to watch for changes. This method must emit signals
         whenever new data is available.
-
-        Args:
-            timeout (float | None): The timeout duration in seconds. If None,
-                                    the method will wait indefinitely.
 
         Must be implemented by subclasses.
         """
@@ -91,16 +90,22 @@ class Poller(ABC):
         self.logger.info(f"Starting {name}: Watching for changes")
         # self.fetch is called for the firstime, whehever a a client subscribe to
         # this poller, so there's no need to initialy fetch data
-        if timeout:
+        watch_task = asyncio.create_task(self._watch())
+        if timeout is not None:
             until = datetime.now() + timedelta(seconds=timeout)
             self.logger.debug(f"{name}: Stop programed at {until}")
+        try:
+            await asyncio.wait_for(watch_task, timeout)
+        except asyncio.TimeoutError:
+            self.logger.info(f"{name}: Run timeout '{until}' reached")
+        except asyncio.CancelledError:
+            self.logger.info(f"{name}: Run was cancelled")
+        finally:
+            watch_task.cancel()
             try:
-                await asyncio.wait_for(self._watch, timeout)
-            except asyncio.TimeoutError:
-                self.logger.info(f"{name}: Run timeout '{until}'reached")
-        else:
-            # Run indefinitely.
-            await self._watch()
+                await watch_task
+            except asyncio.CancelledError:
+                self.logger.info(f"{name}: Watch task was cancelled")
 
 
 T = TypeVar("T")
@@ -111,11 +116,15 @@ class DataPoller(Poller, Generic[T]):
         super(DataPoller, self).__init__(logger)
 
         # init client
-        self.client: T = client
+        self._client: T = client
 
         # Computed from settings
-        self.included_hosts = settings.traefik_included_hosts
-        self.excluded_hosts = settings.traefik_excluded_hosts
+        self.included_hosts = settings.included_hosts
+        self.excluded_hosts = settings.excluded_hosts
+
+    @property
+    def client(self) -> T:
+        return self._client
 
 
 # ruff: noqa: E402

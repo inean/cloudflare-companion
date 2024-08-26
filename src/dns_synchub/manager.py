@@ -27,7 +27,7 @@ class DataManager:
         self._combine_data({source: names})
         await self.mappers.emit()
 
-    def _combine_data(self, data: dict[PollerSource, list[str]]) -> dict[PollerSource, list[str]]:
+    def _combine_data(self, data: dict[PollerSource, list[str]]):
         """Combine data from multiple pollers."""
         for source, values in data.items():
             assert isinstance(values, list)
@@ -78,7 +78,7 @@ class DataManager:
         """Aggregate and return the latest data from all pollers."""
         for poller, _ in self.pollers:
             try:
-                names, source = poller.events.get_data()
+                names, source = poller.events.get_data(self)
                 self._combine_data({source: names})
             except asyncio.QueueEmpty:
                 pass

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Generic, TypeVar
 
 T = TypeVar("T", bound=Callable)
@@ -16,7 +16,7 @@ class EventEmitter(Generic[T]):
         # Subscribers
         self._subscribers: dict[T, tuple[asyncio.Queue, float, float]] = {}
 
-    def __iter__(self) -> Iterator[tuple[T, tuple]]:
+    def __iter__(self):
         return iter(self._subscribers.values())
 
     def __len__(self) -> int:
@@ -99,5 +99,5 @@ class EventEmitter(Generic[T]):
         return callback in self._subscribers and not self._subscribers[callback][0].empty()
 
     def get_data(self, callback: T):
-        queue, _, _ = self._subscribers.get(callback)
+        queue, _, _ = self._subscribers[callback]
         return queue.get_nowait()

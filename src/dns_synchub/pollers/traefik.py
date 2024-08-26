@@ -2,11 +2,11 @@ import asyncio
 import re
 
 import requests
-from dns_synchub.internal._decorators import BackoffError, async_backoff
-from dns_synchub.settings import Settings
 from typing_extensions import override
 
+from dns_synchub.internal._decorators import BackoffError, retry
 from dns_synchub.pollers import DataPoller, PollerSource
+from dns_synchub.settings import Settings
 
 
 class TimeoutSession(requests.Session):
@@ -89,10 +89,10 @@ class TraefikPoller(DataPoller[requests.Session]):
             return
 
     @override
-    @async_backoff
+    @retry
     def fetch(self) -> tuple[list[str, PollerSource]]:
         try:
-            response = self.client.get(self.poll_url)
+            response = self._client.get(self.poll_url)
             response.raise_for_status()
         except requests.exceptions.RequestException as err:
             self.logger.error(f"Failed to fetch route from Traefik API: {err}")
