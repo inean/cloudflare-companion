@@ -3,6 +3,7 @@ import logging
 import re
 from datetime import datetime
 from functools import lru_cache
+from typing import Any, cast
 
 import docker
 from docker import DockerClient
@@ -97,7 +98,7 @@ class DockerPoller(DataPoller[DockerClient]):
                 raise DockerError("Could not connect to Docker", error=err) from err
             else:
                 # Get Docker Host info
-                info = self._client.info()
+                info = cast(dict[str, Any], self._client.info())  # type: ignore
                 self.logger.debug(f"Connected to Docker Host at '{info.get('Name')}'")
         return self._client
 
@@ -119,7 +120,7 @@ class DockerPoller(DataPoller[DockerClient]):
         return False
 
     def _validate(self, raw_data: list[DockerContainer]) -> tuple[list[str], PollerSource]:
-        data = []
+        data: list[str] = []
         for container in raw_data:
             # Check if container is enabled
             if not self._is_enabled(container):
@@ -162,7 +163,10 @@ class DockerPoller(DataPoller[DockerClient]):
     def fetch(self) -> tuple[list[str], PollerSource]:
         try:
             raw_data = self.client.containers.list(filters={"status": "running"})
-            services = [DockerContainer(container, logger=self.logger) for container in raw_data]
+            services = [
+                DockerContainer(container, logger=self.logger)
+                for container in cast(list[Container], raw_data)
+            ]
         except DockerException:
             services = []
         return self._validate(services)

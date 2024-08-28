@@ -9,6 +9,7 @@ import docker
 import docker.client
 import docker.errors
 import pytest
+
 from dns_synchub.pollers.docker import DockerError, DockerPoller
 from dns_synchub.settings import Settings
 
@@ -115,26 +116,26 @@ def test_init(logger: MagicMock, settings: Settings):
     assert poller.filter_value == settings.docker_filter_value
 
 
-def test_init_from_env(logger, settings):
+def test_init_from_env(logger: MagicMock, settings: Settings):
     poller = DockerPoller(logger, settings=settings)
     assert isinstance(poller.client, docker.DockerClient)
 
 
-def test_init_from_client(logger, settings):
+def test_init_from_client(logger: MagicMock, settings: Settings):
     client = docker.DockerClient(base_url="unix:///")
     poller = DockerPoller(logger, settings=settings, client=client)
     assert poller.client == client
 
 
 @pytest.mark.asyncio
-async def test_fetch(docker_poller):
+async def test_fetch(docker_poller: DockerPoller):
     hosts, source = await docker_poller.fetch()
     assert source == "docker"
     assert hosts == [f"subdomain{i}.example.ltd" for i in range(1, 5)]
 
 
 @pytest.mark.asyncio
-async def test_fetch_filter_by_label(docker_poller):
+async def test_fetch_filter_by_label(docker_poller: DockerPoller):
     docker_poller.filter_label = re.compile(r"traefik.constraint")
     hosts, source = await docker_poller.fetch()
     assert source == "docker"
@@ -142,7 +143,7 @@ async def test_fetch_filter_by_label(docker_poller):
 
 
 @pytest.mark.asyncio
-async def test_fetch_filter_by_value(docker_poller):
+async def test_fetch_filter_by_value(docker_poller: DockerPoller):
     docker_poller.filter_label = re.compile(r"traefik.constraint")
     docker_poller.filter_value = re.compile(r"enable")
     hosts, source = await docker_poller.fetch()
@@ -151,7 +152,7 @@ async def test_fetch_filter_by_value(docker_poller):
 
 
 @pytest.mark.asyncio
-async def test_run(docker_poller):
+async def test_run(docker_poller: DockerPoller):
     callback_mock = MagicMock()
     await docker_poller.events.subscribe(callback_mock)
     assert 0 == callback_mock.call_count
@@ -173,8 +174,8 @@ async def test_run(docker_poller):
 
 
 @pytest.mark.asyncio
-async def test_run_canceled(docker_poller):
-    async def cancel(task):
+async def test_run_canceled(docker_poller: DockerPoller):
+    async def cancel(task: asyncio.Task[Any]) -> None:
         await asyncio.sleep(0.1)
         task.cancel()
 

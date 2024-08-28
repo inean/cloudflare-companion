@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from logging import Logger
 
-from CloudFlare import CloudFlare
-from CloudFlare import exceptions as CloudFlareExceptions
-from typing_extensions import deprecated
+from CloudFlare import CloudFlare  # type: ignore
+from CloudFlare import exceptions as CloudFlareExceptions  # type: ignore
 
 from dns_synchub.mappers import DataMapper, MapperConfig
 from dns_synchub.settings import DomainsModel, Settings
@@ -20,7 +20,7 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
         "max_retries": 5,
     }
 
-    def __init__(self, logger, *, settings: Settings, client: CloudFlare | None = None):
+    def __init__(self, logger: Logger, *, settings: Settings, client: CloudFlare | None = None):
         if client is None:
             assert settings.cf_token is not None
             client = CloudFlare(
@@ -119,8 +119,3 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
                 self.logger.error("** %s - %d %s" % (name, ex, ex))
                 ok = False
         return ok
-
-    # Start Program to update the Cloudflare
-    @deprecated("Use update_zones instead")
-    def point_domain(self, name, domain_infos: list[DomainsModel]):
-        return asyncio.run(self.sync(name, domain_infos))

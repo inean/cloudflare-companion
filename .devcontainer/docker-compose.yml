@@ -1,5 +1,4 @@
 ---
-version: '3.8'
 name: "dns-synchub"
 services:
   devcontainer:
@@ -9,7 +8,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
-      - ..:/workspace:cached
+      - "..:/workspace:cached"
     cap_add:
       - SYS_ADMIN
       - AUDIT_WRITE
@@ -21,31 +20,32 @@ services:
       - traefik
       - whoami
     # Override the default command so things don't shut down after the process ends.
-    command: sleep infinity
-    labels:
-      - "traefik.enable=false"
+    command: "sleep infinity"
 
   traefik:
-    image: traefik:v3.1
-    container_name: traefik
+    image: "traefik:v3.1"
+    container_name: "traefik"
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
-      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.address=:3000"
+      - "--providers.docker.exposedbydefault=false"
     ports:
       - "8080:8080"
-      - "80:80"
+      - "3000:3000"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
     cap_add:
-      - SYS_ADMIN
+      - "SYS_ADMIN"
     security_opt:
-      - seccomp=unconfined
-      - label=disable
-      - apparmor=unconfined
+      - "seccomp=unconfined"
+      - "label=disable"
+      - "apparmor=unconfined"
 
   whoami:
-    image: containous/whoami
-    container_name: whoami
+    image: "containous/whoami"
+    container_name: "whoami"
     labels:
+      - "traefik.enable=true"
       - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
+      - "traefik.http.routers.whoami.entrypoints=web"

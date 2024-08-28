@@ -9,7 +9,7 @@ from typing_extensions import Self
 # - _FIELD  like env vars
 # -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
 #
-from .internal._settings import _EnvSettingsSource
+from .internal._settings import _EnvSettingsSource  # type:ignore
 
 EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value  # type:ignore
 EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars  # type:ignore
@@ -63,14 +63,15 @@ class Settings(BaseSettings):
     enable_docker_poll: bool = True
     docker_timeout_seconds: int = 5  # Timeout for requests based Docker client operations
     docker_poll_seconds: int = 30  # Polling interval in seconds
+    docker_filter_value: re.Pattern[str] | None = None
+    docker_filter_label: re.Pattern[str] | None = None
 
     # Traefik Settings
     enable_traefik_poll: bool = False
     traefik_poll_url: str | None = None
     traefik_poll_seconds: int = 30  # Polling interval in seconds
     traefik_timeout_seconds: int = 5  # Timeout for blocking requests operations
-    docker_filter_value: re.Pattern | None = None
-    docker_filter_label: re.Pattern | None = None
+    traefik_excluded_providers: list[str] = ["docker"]
 
     # Mapper Settings
     target_domain: str | None = None
@@ -79,8 +80,8 @@ class Settings(BaseSettings):
     proxied: bool = True
     rc_type: RecordType = "CNAME"
 
-    included_hosts: list[re.Pattern] = []
-    excluded_hosts: list[re.Pattern] = []
+    included_hosts: list[re.Pattern[str]] = []
+    excluded_hosts: list[re.Pattern[str]] = []
 
     # Cloudflare Settings
     cf_token: str | None = None

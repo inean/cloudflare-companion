@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Generic, Literal, TypedDict, TypeVar
+from logging import Logger
+from typing import Any, Callable, Generic, Literal, TypedDict, TypeVar
 from weakref import ref as WeakRef
 
 from typing_extensions import override
 
 from dns_synchub.events import EventEmitter
+from dns_synchub.internal._decorators import retry
 from dns_synchub.settings import Settings
 
 PollerSource = Literal["manual", "docker", "traefik"]
@@ -25,15 +25,15 @@ class PollerConfig(TypedDict, total=False):
     """The source of the poller"""
 
 
-class PollerEvents(EventEmitter[Callable]):
-    def __init__(self, logger: logging.Logger, *, poller: Poller):
+class PollerEvents(EventEmitter[Callable[..., Any]]):
+    def __init__(self, logger: Logger, *, poller: Poller):
         self.poller = WeakRef(poller)
         assert "source" in poller.config
         super(PollerEvents, self).__init__(logger, name=poller.config["source"])
 
     # Event related methods
     @override
-    async def subscribe(self, callback: Callable, backoff: float = 0):
+    async def subscribe(self, callback: Callable[..., Any], backoff: float = 0):
         # Register subscriber
         await super(PollerEvents, self).subscribe(callback, backoff=backoff)
         # Fetch data and store locally if required
@@ -48,12 +48,12 @@ class Poller(ABC):
         "backoff_factor": 4,
     }
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: Logger):
         """
         Initializes the Poller with a logger and a client.
 
         Args:
-            logger (logging.Logger): The logger instance for logging.
+            logger (Logger): The logger instance for logging.
             client (Any): The client instance for making requests.
         """
         self.logger = logger
@@ -61,7 +61,8 @@ class Poller(ABC):
 
     # Poller methods
     @abstractmethod
-    async def fetch(self):
+    @retry
+    async def fetch(self) -> tuple[list[str], PollerSource]:
         """
         Abstract method to fetch data.
         Must be implemented by subclasses.
@@ -97,7 +98,7 @@ class Poller(ABC):
         try:
             await asyncio.wait_for(watch_task, timeout)
         except asyncio.TimeoutError:
-            self.logger.info(f"{name}: Run timeout '{until}' reached")
+            self.logger.info(f"{name}: Run timeout '{timeout}s' reached")
         except asyncio.CancelledError:
             self.logger.info(f"{name}: Run was cancelled")
         finally:
@@ -112,11 +113,11 @@ T = TypeVar("T")
 
 
 class DataPoller(Poller, Generic[T]):
-    def __init__(self, logger, *, settings: Settings, client: Any):
+    def __init__(self, logger: Logger, *, settings: Settings, client: Any):
         super(DataPoller, self).__init__(logger)
 
         # init client
-        self._client: T = client
+        self._client: T | None = client
 
         # Computed from settings
         self.included_hosts = settings.included_hosts
