@@ -1,32 +1,35 @@
 import asyncio
 import re
 from logging import Logger
-from typing import Any
-from unittest.mock import MagicMock, patch
+from typing import Any, cast
+from unittest.mock import MagicMock, call, patch
 from urllib.parse import urlparse
 
 import docker
 import docker.client
 import docker.errors
 import pytest
-
 from dns_synchub.pollers.docker import DockerError, DockerPoller
 from dns_synchub.settings import Settings
 
 
 class MockDockerEvents:
     def __init__(self, data: list[dict[str, str]]):
-        self.data = iter(data)
+        self.data = data
         self.close = MagicMock()
+        self.reset()
 
     def __iter__(self):
         return self
 
     def __next__(self):
         try:
-            return next(self.data)
+            return next(self.iter)
         except StopIteration:
             raise docker.errors.NotFound("No more events")
+
+    def reset(self):
+        self.iter = iter(self.data)
 
 
 @pytest.fixture
@@ -160,17 +163,27 @@ async def test_run(docker_poller: DockerPoller):
     await docker_poller.run(timeout=0.1)
 
     # Check timeout was reached
-    assert any("Run timeout" in str(arg) for arg in docker_poller.logger.info.call_args_list)
+    logger = cast(MagicMock, docker_poller.logger)
+    assert any("Run timeout" in str(arg) for arg in logger.info.call_args_list)
 
     # Docker Client asserts
-    docker_poller.client.events.assert_called_once()
-    docker_poller.client.events.return_value.close.assert_called_once()
+    docker_client_events = cast(MagicMock, docker_poller.client.events)  # type: ignore
+    docker_client_events.assert_called_once()
+    docker_client_events.return_value.close.assert_called_once()
 
-    # Check data
-    callback_mock.assert_called_once()
-    hosts, source = callback_mock.call_args[0]
-    assert source == "docker"
-    assert hosts == [f"subdomain{i}.example.ltd" for i in range(1, 5)]
+    #  Check callback calls. First run will fetch all containers plus events
+    expected_calls = [call([f"subdomain{i}.example.ltd"], "docker") for i in range(1, 5)]
+    expected_calls.insert(0, call([f"subdomain{i}.example.ltd" for i in range(1, 5)], "docker"))
+    assert callback_mock.call_count == len(expected_calls)
+    callback_mock.assert_has_calls(expected_calls, any_order=False)
+
+    # Check the rest of the runs will not perform a fetch
+    expected_calls.pop(0)
+    callback_mock.reset_mock()
+    docker_client_events.return_value.reset()
+    await docker_poller.run(timeout=0.1)
+    assert callback_mock.call_count == len(expected_calls)
+    callback_mock.assert_has_calls(expected_calls, any_order=False)
 
 
 @pytest.mark.asyncio
@@ -184,8 +197,11 @@ async def test_run_canceled(docker_poller: DockerPoller):
     await asyncio.gather(*tasks)
 
     # Check timeout was reached
-    docker_poller.logger.info.assert_any_call("DockerPoller: Run was cancelled")
+    # Check timeout was reached
+    logger = cast(MagicMock, docker_poller.logger)
+    logger.info.assert_any_call("DockerPoller: Run was cancelled")
 
     # Docker Client asserts
-    docker_poller.client.events.assert_called_once()
-    docker_poller.client.events.return_value.close.assert_called_once()
+    docker_client_events = cast(MagicMock, docker_poller.client.events)  # type: ignore
+    docker_client_events.assert_called_once()
+    docker_client_events.return_value.close.assert_called_once()

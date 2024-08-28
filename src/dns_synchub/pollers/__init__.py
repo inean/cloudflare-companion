@@ -4,29 +4,26 @@ import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from logging import Logger
-from typing import Any, Callable, Generic, Literal, TypedDict, TypeVar
+from typing import Any, Callable, Generic, TypedDict, TypeVar
 from weakref import ref as WeakRef
 
 from typing_extensions import override
 
 from dns_synchub.events import EventEmitter
-from dns_synchub.internal._decorators import retry
-from dns_synchub.settings import Settings
-
-PollerSource = Literal["manual", "docker", "traefik"]
+from dns_synchub.settings import PollerSourceType, Settings
 
 
-class PollerConfig(TypedDict, total=False):
-    max_retries: int
+class PollerConfig(TypedDict):
+    stop: int
     """Max number of retries to attempt before exponential backoff fails"""
-    backoff_factor: int
+    wait: int
     """Factor to multiply the backoff time by"""
-    source: PollerSource
+    source: PollerSourceType
     """The source of the poller"""
 
 
 class PollerEvents(EventEmitter[Callable[..., Any]]):
-    def __init__(self, logger: Logger, *, poller: Poller):
+    def __init__(self, logger: Logger, *, poller: Poller[Any]):
         self.poller = WeakRef(poller)
         assert "source" in poller.config
         super(PollerEvents, self).__init__(logger, name=poller.config["source"])
@@ -37,15 +34,14 @@ class PollerEvents(EventEmitter[Callable[..., Any]]):
         # Register subscriber
         await super(PollerEvents, self).subscribe(callback, backoff=backoff)
         # Fetch data and store locally if required
-        poller = self.poller()
-        assert isinstance(poller, Poller)
-        self.set_data(await poller.fetch(), callback=callback)
+        self.set_data(await self.poller().fetch(), callback=callback)  # type: ignore
 
 
-class Poller(ABC):
+class BasePoller(ABC):
     config: PollerConfig = {
-        "max_retries": 0,
-        "backoff_factor": 4,
+        "stop": 3,
+        "wait": 4,
+        "source": "manual",
     }
 
     def __init__(self, logger: Logger):
@@ -57,12 +53,10 @@ class Poller(ABC):
             client (Any): The client instance for making requests.
         """
         self.logger = logger
-        self.events = PollerEvents(logger, poller=self)
 
     # Poller methods
     @abstractmethod
-    @retry
-    async def fetch(self) -> tuple[list[str], PollerSource]:
+    async def fetch(self) -> tuple[list[str], PollerSourceType]:
         """
         Abstract method to fetch data.
         Must be implemented by subclasses.
@@ -112,12 +106,14 @@ class Poller(ABC):
 T = TypeVar("T")
 
 
-class DataPoller(Poller, Generic[T]):
-    def __init__(self, logger: Logger, *, settings: Settings, client: Any):
-        super(DataPoller, self).__init__(logger)
+class Poller(BasePoller, Generic[T]):
+    def __init__(self, logger: Logger, *, settings: Settings, client: T | None = None):
+        super(Poller, self).__init__(logger)
 
         # init client
         self._client: T | None = client
+
+        self.events = PollerEvents(logger, poller=self)
 
         # Computed from settings
         self.included_hosts = settings.included_hosts
@@ -125,7 +121,16 @@ class DataPoller(Poller, Generic[T]):
 
     @property
     def client(self) -> T:
+        assert self._client is not None, "Client is not initialized"
         return self._client
+
+    @abstractmethod
+    async def fetch(self) -> tuple[list[str], PollerSourceType]:
+        """
+        Abstract method to fetch data.
+        Must be implemented by subclasses.
+        """
+        pass
 
 
 # ruff: noqa: E402

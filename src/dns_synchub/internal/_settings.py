@@ -7,11 +7,11 @@ from pydantic_settings.sources import EnvNoneType
 from pydantic_settings_file_envar import FileSuffixEnvSettingsSource
 
 
-class _EnvSettingsSource(EnvSettingsSource):
+class _EnvSettingsSource(EnvSettingsSource):  # type: ignore
     # This method
-    def explode_env_vars(
+    def explode_env_vars(  # type: ignore
         self, field_name: str, field: FieldInfo, env_vars: Mapping[str, str | None]
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[Any]:
         """
         Process env_vars and extract the values of keys containing env_nested_delimiter into nested dictionaries.
 
@@ -32,7 +32,7 @@ class _EnvSettingsSource(EnvSettingsSource):
             f"{env_name}{self.env_nested_delimiter}"
             for _, env_name, _ in self._extract_field_info(field, field_name)
         ]
-        result: dict[str, Any] = {}
+        result: dict[str, Any] | list[Any] = {}
         for env_name, env_val in env_vars.items():
             if not any(env_name.startswith(prefix) for prefix in prefixes):
                 continue
@@ -78,15 +78,15 @@ class _EnvSettingsSource(EnvSettingsSource):
                 result.append(values[i])
         return result
 
-    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any | None, str, bool]:
         # Attenpt to get field wirth default method
-        env_val, fkey, is_complex = self._e_get_field_value_(field, field_name)
+        env_val, fkey, is_complex = self._e_get_field_value_(field, field_name)  # type: ignore
         # Fallback ro _FILE based get_field_value if previous method fails
         if env_val is None:
-            env_val, fkey, is_complex = self._f_get_field_value_(field, field_name)
+            env_val, fkey, is_complex = self._f_get_field_value_(field, field_name)  # type: ignore
         # Return the value, key and if the value is complex
-        return env_val, fkey, is_complex
+        return env_val, fkey, is_complex  # type: ignore
 
 
-EnvSettingsSource._e_get_field_value_ = EnvSettingsSource.get_field_value
-EnvSettingsSource._f_get_field_value_ = FileSuffixEnvSettingsSource.get_field_value
+EnvSettingsSource._e_get_field_value_ = EnvSettingsSource.get_field_value  # type: ignore
+EnvSettingsSource._f_get_field_value_ = FileSuffixEnvSettingsSource.get_field_value  # type: ignore

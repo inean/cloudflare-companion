@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings-file-envar>=0.1.0",
     "asyncio>=3.4.3",
     "python-dotenv>=1.0.1",
+    "tenacity>=9.0.0",
 ]
 description = """
 This will build a Docker image to automatically update CloudFlare DNS

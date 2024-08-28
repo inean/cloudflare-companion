@@ -2,24 +2,29 @@ from __future__ import annotations
 
 import asyncio
 from logging import Logger
+from typing import Any, Awaitable, Callable, cast
 
 from CloudFlare import CloudFlare  # type: ignore
 from CloudFlare import exceptions as CloudFlareExceptions  # type: ignore
+from tenacity import (  # type: ignore
+    AsyncRetrying,
+    RetryCallState,
+    RetryError,
+    retry_if_exception_message,
+    stop_after_attempt,
+    wait_exponential,
+)
+from typing_extensions import override
 
-from dns_synchub.mappers import DataMapper, MapperConfig
-from dns_synchub.settings import DomainsModel, Settings
+from dns_synchub.mappers import Mapper
+from dns_synchub.settings import DomainsModel, PollerSourceType, Settings
 
 
 class CloudFlareException(Exception):
     pass
 
 
-class CloudFlareMapper(DataMapper[CloudFlare]):
-    config: MapperConfig = {
-        "delay_sync": 0,
-        "max_retries": 5,
-    }
-
+class CloudFlareMapper(Mapper[CloudFlare]):
     def __init__(self, logger: Logger, *, settings: Settings, client: CloudFlare | None = None):
         if client is None:
             assert settings.cf_token is not None
@@ -29,93 +34,124 @@ class CloudFlareMapper(DataMapper[CloudFlare]):
             )
             logger.debug("CloudFlare Scoped API client started")
 
-        # Set up the client and logger
-        self.client = client
-
-        # Extract required settings
-        self.dry_run = settings.dry_run
-        self.rc_type = settings.rc_type
-        self.refresh_entries = settings.refresh_entries
-        self.domains = settings.domains
+        self.tout_sec = settings.cf_timeout_seconds
+        self.sync_sec = settings.cf_sync_seconds
 
         # Initialize the parent class
         super(CloudFlareMapper, self).__init__(logger, settings=settings, client=client)
 
-    async def __call__(self, names: list[str], source: str):
-        result = []
-        for name in names:
-            result.append(await self.sync(name, source, self.domains))
-        return result
+    @override
+    async def __call__(self, hosts: list[str], source: PollerSourceType):
+        tasks = [asyncio.create_task(self.sync(host, source)) for host in hosts]
+        try:
+            _, pending = await asyncio.wait(tasks, timeout=self.tout_sec)
+            if pending:
+                for task in pending:
+                    task.cancel()
+                self.logger.warning("Timeout reached. Cancelling pending tasks...")
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            raise
 
-    async def get_records(self, zone_id: str, name: str):
-        for retry in range(self.config["max_retries"]):
-            try:
-                return self.client.zones.dns_records.get(zone_id, params={"name": name})
-            except CloudFlareExceptions.CloudFlareAPIError as err:
-                if "Rate limited" not in str(err):
-                    raise err
-                # Exponential backoff
-                sleep_time = 2 ** (retry + 1)
-                self.logger.warning(f"Max Rate limit reached. Retry in {sleep_time} seconds...")
-                asyncio.sleep(sleep_time)
-        raise CloudFlareException("Max retries exceeded")
+    async def _retry(self, func: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
+        def log_before_sleep(retry_state: RetryCallState):
+            sleep_time = retry_state.upcoming_sleep
+            self.logger.warning(f"Max Rate limit reached. Retry in {sleep_time} seconds...")
 
-    def post_record(self, zone_id, data):
-        if self.dry_run:
-            self.logger.info(f"DRY-RUN: POST to Cloudflare {zone_id}:, {data}")
-        else:
-            self.client.zones.dns_records.post(zone_id, data=data)
-            self.logger.info(f"Created new record in zone {zone_id} with data {data}")
+        retry = AsyncRetrying(
+            stop=stop_after_attempt(self.config["stop"]),
+            wait=wait_exponential(multiplier=self.config["wait"], max=self.tout_sec),
+            retry=retry_if_exception_message(match="Rate limited"),
+            before_sleep=log_before_sleep,
+        )
+        try:
+            async for attempt in retry:
+                with attempt:
+                    return await func(*args, **kwargs)
+        except RetryError as err:
+            last_error = err.last_attempt.result()
+            raise CloudFlareException("Operation failed") from last_error
 
-    def put_record(self, zone_id, record_id, data):
-        if self.dry_run:
-            self.logger.info(f"DRY-RUN: PUT to Cloudflare {zone_id}, {record_id}:, {data}")
-        else:
-            self.client.zones.dns_records.put(zone_id, record_id, data=data)
+    async def get_records(self, zone_id: str, **filter: str) -> list[dict[str, Any]]:
+        async def _get() -> list[dict[str, Any]]:
+            assert self.client is not None
+            return self.client.zones.dns_records.get(zone_id, params=filter)  # type: ignore
+
+        return await self._retry(_get)
+
+    async def post_record(self, zone_id: str, **data: str) -> dict[str, Any]:
+        async def _post() -> dict[str, Any]:
+            if self.dry_run:
+                self.logger.info(f"DRY-RUN: Create new record in zone {zone_id}:, {data}")
+                return {**data, "zone_id": zone_id}
+            result = self.client.zones.dns_records.post(zone_id, data=data)  # type: ignore
+            self.logger.info(f"Created new record in zone {zone_id}: {result}")
+            return cast(dict[str, Any], result)
+
+        return await self._retry(_post)
+
+    async def put_record(self, zone_id: str, record_id: str, **data: str) -> dict[str, Any]:
+        async def _put() -> dict[str, Any]:
+            if self.dry_run:
+                self.logger.info(f"DRY-RUN: Update record {record_id } in zone {zone_id}:, {data}")
+                return {**data, "zone_id": zone_id}
+            result = self.client.zones.dns_records.put(zone_id, record_id, data=data)  # type: ignore
             self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
+            return cast(dict[str, Any], result)
+
+        return await self._retry(_put)
 
     # Start Program to update the Cloudflare
-    async def sync(self, name: str, source, domain_infos: list[DomainsModel]):
-        def is_domain_excluded(logger, name, dom: DomainsModel):
-            for sub_dom in dom.excluded_sub_domains:
-                if f"{sub_dom}.{dom.name}" in name:
-                    logger.info(f"Ignoring {name}: It falls until excluded sub domain: {sub_dom}")
+    @override
+    async def sync(self, host: str, source: PollerSourceType) -> DomainsModel | None:
+        def is_domain_excluded(host: str, domain: DomainsModel):
+            for sub_dom in domain.excluded_sub_domains:
+                if f"{sub_dom}.{domain.name}" in host:
+                    self.logger.info(f"Ignoring {host}: Match excluded sub domain: {sub_dom}")
                     return True
             return False
 
-        ok = True
-        for domain_info in domain_infos:
+        for domain_info in self.domains:
             # Don't update the domain if it's the same as the target domain, which sould be used on tunnel
-            if name == domain_info.target_domain:
+            if host == domain_info.target_domain:
                 continue
             # Skip if it's not a subdomain of the domain we're looking for
-            if name.find(domain_info.name) < 0:
+            if host.find(domain_info.name) < 0:
                 continue
-            # Skip if the domain is exclude list
-            if is_domain_excluded(self.logger, name, domain_info):
+            # Skip if the domain is in exclude list
+            if is_domain_excluded(host, domain_info):
                 continue
-            # Fetch the records for the domain, if any
-            if (records := await self.get_records(domain_info.zone_id, name)) is None:
-                ok = False
-                continue
+            # Skip if already present and refresh entries is not required
+            records = await self.get_records(domain_info.zone_id, name=host)
+            if records and not self.refresh_entries:
+                assert len(records) == 1
+                self.logger.info(f"Record {host} found. Not refreshing. Skipping...")
+                return DomainsModel(**records.pop())
             # Prepare data for the new record
-            data = {
-                "type": self.rc_type,
-                "name": name,
-                "content": domain_info.target_domain,
-                "ttl": int(domain_info.ttl),
-                "proxied": domain_info.proxied,
-                "comment": domain_info.comment,
-            }
+            data = cast(
+                dict[str, str],
+                {
+                    "type": self.rc_type,
+                    "name": host,
+                    "content": domain_info.target_domain,
+                    "ttl": str(domain_info.ttl) if domain_info.ttl is not None else "auto",
+                    "proxied": str(domain_info.proxied),
+                    "comment": domain_info.comment,
+                    "tag": f"poller:{source}",
+                },
+            )
+            result = None
             try:
                 # Update the record if it already exists
-                if self.refresh_entries and len(records) > 0:
-                    for record in records:
-                        self.put_record(domain_info.zone_id, record["id"], data)
+                if records:
+                    assert len(records) == 1
+                    assert self.refresh_entries
+                    result = await self.put_record(domain_info.zone_id, records.pop()["id"], **data)
                 # Create a new record if it doesn't exist yet
                 else:
-                    self.post_record(domain_info.zone_id, data)
-            except CloudFlareExceptions.CloudFlareAPIError as ex:
-                self.logger.error("** %s - %d %s" % (name, ex, ex))
-                ok = False
-        return ok
+                    result = await self.post_record(domain_info.zone_id, **data)
+            except CloudFlareExceptions.CloudFlareAPIError as err:
+                self.logger.error(f"Sync Error for {host}: {str(err)} [Code {int(err)}]")
+            finally:
+                return DomainsModel(**result) if result else None

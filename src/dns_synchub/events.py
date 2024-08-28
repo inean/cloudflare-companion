@@ -1,20 +1,47 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
-from collections.abc import Callable
-from typing import Generic, TypeVar
+from logging import Logger
+from typing import (
+    Callable,
+    Coroutine,
+    Generic,
+    Protocol,
+    TypeAlias,
+    TypeVar,
+)
 
-T = TypeVar("T", bound=Callable)
+from dns_synchub.settings import PollerSourceType
+
+PollerSourceEvent: TypeAlias = tuple[list[str], PollerSourceType]
+
+
+class EventSubscriber(Protocol):
+    def __call__(self, hosts: list[str], source: PollerSourceType) -> None: ...
+
+
+class AsyncEventSubscriber(Protocol):
+    async def __call__(self, hosts: list[str], source: PollerSourceType) -> None: ...
+
+
+T = TypeVar(
+    "T",
+    bound=Callable[[list[str], PollerSourceType], None]
+    | Coroutine[None, None, None]
+    | EventSubscriber
+    | AsyncEventSubscriber,
+)
+
+EventSubscriberType = tuple[asyncio.Queue[PollerSourceEvent], float, float]
 
 
 class EventEmitter(Generic[T]):
-    def __init__(self, logger: logging.Logger, *, name: str):
+    def __init__(self, logger: Logger, *, name: str):
         self.logger = logger
         self.logger_name = name
         # Subscribers
-        self._subscribers: dict[T, tuple[asyncio.Queue, float, float]] = {}
+        self._subscribers: dict[T, EventSubscriberType] = {}
 
     def __iter__(self):
         return iter(self._subscribers.values())
@@ -51,26 +78,33 @@ class EventEmitter(Generic[T]):
         Calls each subscriber's callback with the data.
         """
 
-        async def invoke(callback: T, queue: asyncio.Queue, backoff, last_called):
+        async def invoke(
+            callback: T,
+            queue: asyncio.Queue[PollerSourceEvent],
+            backoff: float,
+            last_called: float,
+        ) -> tuple[T, EventSubscriberType]:
             while not queue.empty():
                 current_time = time.time()
                 if current_time - last_called >= backoff:
                     # Get callback function
-                    func = callback.__call__ if hasattr(callback, "__call__") else callback
+                    func: T = getattr(callback, "__call__", callback)
                     assert callable(func)
                     # Get data from queue
-                    data = await queue.get()
+                    data: PollerSourceEvent = await queue.get()
                     # Invoke
-                    await func(*data) if asyncio.iscoroutinefunction(func) else func(*data)
-                    return callback, (queue, backoff, current_time)
+                    if asyncio.iscoroutinefunction(func):
+                        await func(*data)
+                    else:
+                        func(*data)
                 else:
                     # Wait for backoff time and try emit again
                     await asyncio.sleep(backoff - (current_time - last_called))
             return callback, (queue, backoff, last_called)
 
-        tasks = []
-        for callback, (queue, backoff, last_called) in self._subscribers.items():
-            task = asyncio.create_task(invoke(callback, queue, backoff, last_called))
+        tasks: list[asyncio.Task[tuple[T, EventSubscriberType]]] = []
+        for callback, args in self._subscribers.items():
+            task = asyncio.create_task(invoke(callback, *args))
             tasks.append(task)
         try:
             # Await for tasks to complete
@@ -86,7 +120,7 @@ class EventEmitter(Generic[T]):
             pass
 
     # Data related methods
-    def set_data(self, data, callback: T | None = None):
+    def set_data(self, data: PollerSourceEvent, *, callback: T | None = None):
         if callback is None:
             for queue, _, _ in self._subscribers.values():
                 queue.put_nowait(data)
@@ -98,6 +132,6 @@ class EventEmitter(Generic[T]):
     def has_data(self, callback: T):
         return callback in self._subscribers and not self._subscribers[callback][0].empty()
 
-    def get_data(self, callback: T):
+    def get_data(self, callback: T) -> PollerSourceEvent:
         queue, _, _ = self._subscribers[callback]
         return queue.get_nowait()

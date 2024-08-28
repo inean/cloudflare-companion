@@ -7,13 +7,13 @@ from typing import Any, cast
 
 import docker
 from docker import DockerClient
-from docker.errors import DockerException, NotFound
+from docker.errors import NotFound
 from docker.models.containers import Container
+from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
 from typing_extensions import override
 
-from dns_synchub.internal._decorators import retry
-from dns_synchub.pollers import DataPoller, PollerSource
-from dns_synchub.settings import Settings
+from dns_synchub.pollers import Poller
+from dns_synchub.settings import PollerSourceType, Settings
 
 
 class DockerError(Exception):
@@ -62,10 +62,8 @@ class DockerContainer:
         return []
 
 
-class DockerPoller(DataPoller[DockerClient]):
-    config = DataPoller.config | {
-        "source": "docker",
-    }
+class DockerPoller(Poller[DockerClient]):
+    config = {**Poller.config, "source": "docker"}
 
     def __init__(
         self,
@@ -119,7 +117,7 @@ class DockerPoller(DataPoller[DockerClient]):
                 return self.filter_value.match(value)
         return False
 
-    def _validate(self, raw_data: list[DockerContainer]) -> tuple[list[str], PollerSource]:
+    def _validate(self, raw_data: list[DockerContainer]) -> tuple[list[str], PollerSourceType]:
         data: list[str] = []
         for container in raw_data:
             # Check if container is enabled
@@ -143,10 +141,14 @@ class DockerPoller(DataPoller[DockerClient]):
             # Ther's no swarm in podman engine, so remove Action filter
             filter = {"Type": "service", "status": "start"}
             kwargs = {"since": since, "until": until, "filters": filter, "decode": True}
+            events = None
             try:
-                events = self.client.events(**kwargs)
+                events: Any = self.client.events(**kwargs)  # type: ignore
                 for event in events:
-                    raw_data = self.client.containers.get(event.get("id"))
+                    if "id" not in event:
+                        self.logger.warning("Container ID is None. Skipping container.")
+                        continue
+                    raw_data = self.client.containers.get(event["id"])
                     services = [DockerContainer(raw_data, logger=self.logger)]
                     self.events.set_data(self._validate(services))
             except NotFound:
@@ -156,17 +158,20 @@ class DockerPoller(DataPoller[DockerClient]):
                 self.logger.info("Dokcker polling cancelled. Performing cleanup.")
                 return
             finally:
-                events.close()
+                _ = events and events.close()
 
     @override
-    @retry
-    def fetch(self) -> tuple[list[str], PollerSource]:
+    async def fetch(self) -> tuple[list[str], PollerSourceType]:
+        stop = stop_after_attempt(self.config["stop"])
+        wait = wait_exponential(multiplier=self.config["wait"], max=self.tout_sec)
+        rawdata = []
+        filters = {"status": "running"}
         try:
-            raw_data = self.client.containers.list(filters={"status": "running"})
-            services = [
-                DockerContainer(container, logger=self.logger)
-                for container in cast(list[Container], raw_data)
-            ]
-        except DockerException:
-            services = []
-        return self._validate(services)
+            async for attempt in AsyncRetrying(stop=stop, wait=wait):
+                with attempt:
+                    raw_data = cast(list[Container], self.client.containers.list(filters=filters))  # type: ignore
+                    rawdata = [DockerContainer(c, logger=self.logger) for c in raw_data]
+        except RetryError as err:
+            self.logger.critical(f"Could not fetch containers: {err}")
+        # Return a collection of routes
+        return self._validate(rawdata)

@@ -23,6 +23,7 @@ def initialize_logger(settings: Settings):
     # Set up logging
     logger = logging.getLogger(__name__)
 
+    fmt = None
     if log_level == "DEBUG":
         logger.setLevel(logging.DEBUG)
         fmt = "%(asctime)s %(levelname)s %(lineno)d | %(message)s"
@@ -35,9 +36,9 @@ def initialize_logger(settings: Settings):
         logger.setLevel(logging.INFO)
         fmt = "%(asctime)s %(levelname)s | %(message)s"
 
+    formatter = logging.Formatter(fmt, "%Y-%m-%dT%H:%M:%S%z")
     if log_type in ("CONSOLE", "BOTH"):
         ch = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter(fmt, "%Y-%m-%dT%H:%M:%S%z")
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
@@ -53,13 +54,13 @@ def initialize_logger(settings: Settings):
 
 
 def report_current_status_and_settings(logger: logging.Logger, settings: Settings):
-    settings.dry_run and logger.info(f"Dry Run: {settings.dry_run}")
+    settings.dry_run and logger.info(f"Dry Run: {settings.dry_run}")  # type: ignore
     logger.debug(f"Default TTL: {settings.default_ttl}")
     logger.debug(f"Refresh Entries: {settings.refresh_entries}")
 
     logger.debug(f"Traefik Polling Mode: {'On' if settings.enable_traefik_poll else 'Off'}")
     if settings.enable_traefik_poll:
-        if re.match(r"^\w+://[^/?#]+", settings.traefik_poll_url):
+        if settings.traefik_poll_url and re.match(r"^\w+://[^/?#]+", settings.traefik_poll_url):
             logger.debug(f"Traefik Poll Url: {settings.traefik_poll_url}")
             logger.debug(f"Traefik Poll Seconds: {settings.traefik_poll_seconds}")
         else:
@@ -85,5 +86,6 @@ def get_logger(settings: Settings | None = None) -> logging.Logger:
     if logger is None and settings is None:
         raise ValueError("Logger has not been initialized")
     # Init logger if needed
+    assert settings is not None, "Settings must be provided if logger is not initialized"
     logger = logger or initialize_logger(settings)
     return logger

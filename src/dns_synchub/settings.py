@@ -21,12 +21,14 @@ RecordType = Literal["A", "AAAA", "CNAME"]
 def validate_ttl(value: int | Literal["auto"]) -> int | Literal["auto"]:
     if isinstance(value, int) and value >= 30:
         return value
-    if value != "auto":
+    if value == "auto":
         return value
     raise ValueError("TTL must be at least 30 seconds or 'auto'")
 
 
 TTLType = Annotated[int | str, BeforeValidator(validate_ttl)]
+
+PollerSourceType = Literal["manual", "docker", "traefik"]
 
 
 class DomainsModel(BaseModel):
@@ -85,7 +87,8 @@ class Settings(BaseSettings):
 
     # Cloudflare Settings
     cf_token: str | None = None
-    cf_sync_interval: int = 300  # Sync interval in seconds
+    cf_sync_seconds: int = 300  # Sync interval in seconds
+    cf_timeout_seconds: int = 30  # Timeout for blocking requests operations
 
     domains: list[DomainsModel] = []
 

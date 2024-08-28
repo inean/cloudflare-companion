@@ -2,7 +2,6 @@ from logging import Logger
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from dns_synchub.pollers.traefik import TraefikPoller
 from dns_synchub.settings import Settings
 
@@ -19,7 +18,7 @@ def mock_logger():
 
 @pytest.fixture
 def mock_api_no_routers():
-    with patch("requests.get") as mock_get:
+    with patch("requests.Session.get") as mock_get:
         mock_get.return_value.ok = True
         mock_get.return_value.json.return_value = []
         yield mock_get
