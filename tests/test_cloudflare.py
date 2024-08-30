@@ -22,7 +22,7 @@ def settings():
         )
         records.append(entry)
 
-    return Settings(cf_token="token", domains=records)
+    return Settings(cf_token="token", dry_run=True, domains=records)
 
 
 @pytest.fixture
@@ -151,7 +151,7 @@ async def test_post_record(mock_logger: MagicMock, settings: Settings, mock_cf_c
 
     # Dry run
     await mapper.post_record(zone_id, **zone)
-    assert mock_cf_client.zones.dns_records.post.not_called()
+    mock_cf_client.zones.dns_records.post.assert_not_called()
     cast(MagicMock, mapper.logger.info).assert_called_once()
 
     with patch.object(mapper, "dry_run", False):
@@ -174,7 +174,7 @@ async def test_put_record(mock_logger: MagicMock, settings: Settings, mock_cf_cl
 
     # Dry run call
     await mapper.put_record(zone_id, record_id, **zone)
-    mock_cf_client.zones.dns_records.put.not_called()
+    mock_cf_client.zones.dns_records.put.assert_not_called()
     cast(MagicMock, mapper.logger.info).assert_called_once()
 
     with patch.object(mapper, "dry_run", False):
@@ -244,7 +244,7 @@ async def test_sync_with_record_creation(
 
     # dry run
     result = await mapper.sync(host, "manual")
-    assert mock_cf_client.zones.dns_records.post.not_called()
+    mock_cf_client.zones.dns_records.post.assert_not_called()
     cast(MagicMock, mapper.logger.info).assert_called_once()
 
     with patch.object(mapper, "dry_run", False):
@@ -263,7 +263,7 @@ async def test_sync_with_record_update(
 
     # dry run
     result = await mapper.sync(host, "manual")
-    mock_cf_client.zones.dns_records.put.not_called()
+    mock_cf_client.zones.dns_records.put.assert_not_called()
     cast(MagicMock, mapper.logger.info).assert_called_once()
 
     with patch.object(mapper, "dry_run", False):

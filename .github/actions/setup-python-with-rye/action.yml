@@ -38,7 +38,7 @@ runs:
         rye config --set-bool behavior.use-uv=true
       shell: bash
 
-    - name: Pin Python Version ${{ steps.extract-python-version.outputs.python-version }}
+    - name: Pin Python Version
       run: |
         export PYTHONUNBUFFERED=True
         rye pin ${{ steps.extract-python-version.outputs.python-version }}
@@ -55,7 +55,7 @@ runs:
       shell: bash
 
     - name: Cache pre-commit
-      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9  # v4.0.2
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       with:
         path: ~/.cache/pre-commit
         key: pre-commit-|${{ steps.extract-python-version.outputs.python-version }}|${{ hashFiles('.pre-commit-config.yaml') }}

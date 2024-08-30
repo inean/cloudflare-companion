@@ -10,20 +10,22 @@ inputs:
 outputs:
   python-version:
     description: The Python version to use
+    value: ${{ steps.extract-python-version.outputs.python-version }}
 
 runs:
   using: "composite"
   steps:
-      - name: Extract Python Version
-        run: |
-          PYTHON_VERSION="${{ inputs.python-version }}"
-          if [ -z "$PYTHON_VERSION" ]; then
-            PYTHON_VERSION=$(cat .python-version)
-          fi
-          if [ -z "$PYTHON_VERSION" ]; then
-            echo "No Python version specified, and no .python-version file found"
-            exit 1
-          fi
-          echo "Python version specified: $PYTHON_VERSION"
-          echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
-        shell: bash
+    - name: Extract Python Version
+      id: extract-python-version
+      run: |
+        PYTHON_VERSION="${{ inputs.python-version }}"
+        if [ -z "$PYTHON_VERSION" ]; then
+          PYTHON_VERSION=$(cat .python-version)
+        fi
+        if [ -z "$PYTHON_VERSION" ]; then
+          echo "No Python version specified, and no .python-version file found"
+          exit 1
+        fi
+        echo "Python version specified: $PYTHON_VERSION"
+        echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+      shell: bash

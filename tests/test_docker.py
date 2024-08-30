@@ -34,7 +34,7 @@ class MockDockerEvents:
 
 @pytest.fixture
 def settings():
-    return Settings(cf_token="token")
+    return Settings(cf_token="token", dry_run=True)
 
 
 @pytest.fixture

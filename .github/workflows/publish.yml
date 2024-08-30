@@ -11,17 +11,17 @@ on:
 
   # Trigger the workflow on new releases
   release:
-    types: [ published ]
+    types: [published]
 
   # Trigger the workflow on push or pull request when the
   # Dockerfile is updated or the dependencies are updated
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - Dockerfile
       - requirements.lock
       - pyproject.toml
-      - src/__about__.py
+      - src/dns_synchub/dns_synchub/__about__.py
 
 env:
   REGISTRY: ghcr.io
@@ -29,7 +29,6 @@ env:
 
 jobs:
   build-and-push-image:
-
     runs-on: ubuntu-latest
 
     permissions:
@@ -55,11 +54,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from src/__about__.py
+      - name: Compute Environment
         id: extract_version
         run: |
-          VERSION=$(grep -Po '(?<=^__version__ = ")[^"]*' src/__about__.py)
+          VERSION=$(grep -Po '(?<=^__version__ = ")[^"]*' src/dns_synchub/__about__.py)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          PYTHON_VERSION=$(cat .python-version)
+          echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Extract metadata (tags, labels) for Docker
@@ -70,10 +71,11 @@ jobs:
             name=${{ env.IMAGE_NAME }}
             name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=ref,event=pr
-            type=semver,pattern={{version}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}},value=v${{ env.VERSION }},enable=${{ !startsWith(env.VERSION, '0') }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ env.VERSION }}
+            type=semver,pattern={{version}},value=v${{ env.VERSION }}
 
       - name: Build and Push image
         id: push
@@ -84,6 +86,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ !env.ACT && github.event_name != 'pull_request' }}
+          build-args: |
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
 
       # Skip step because unsupported env variable: ACTIONS_ID_TOKEN_REQUEST_URL
       # See https://github.com/nektos/act/issues/329
