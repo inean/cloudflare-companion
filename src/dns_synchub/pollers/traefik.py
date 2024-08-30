@@ -1,42 +1,44 @@
 import asyncio
 import re
+from logging import Logger
+from typing import Any
 
-import requests
-from internal._decorators import BackoffError, async_backoff
-from settings import Settings
+from requests import Session
+from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
 from typing_extensions import override
 
-from pollers import DataPoller, PollerSource
+from dns_synchub.pollers import Poller
+from dns_synchub.settings import PollerSourceType, Settings
 
 
-class TimeoutSession(requests.Session):
+class TimeoutSession(Session):
     def __init__(self, *, timeout: float | None = None):
         self.timeout = timeout
         super().__init__()
 
-    def request(self, *args, **kwargs):
+    def request(self, *args: Any, **kwargs: dict[str, Any]):
         if "timeout" not in kwargs and self.timeout:
-            kwargs["timeout"] = self.timeout
+            kwargs["timeout"] = self.timeout  # type: ignore
         return super().request(*args, **kwargs)
 
 
-class TraefikPoller(DataPoller[requests.Session]):
-    config = DataPoller.config | {
-        "source": "traefik",
-    }
+class TraefikPoller(Poller[Session]):
+    config = {**Poller.config, "source": "traefik"}
 
-    def __init__(self, logger, *, settings: Settings, client: requests.Session | None = None):
-        # Initialize the Poller
-        super(TraefikPoller, self).__init__(
-            logger,
-            settings=settings,
-            client=client or TimeoutSession(timeout=settings.traefik_timeout_seconds),
-        )
+    def __init__(self, logger: Logger, *, settings: Settings, client: Session | None = None):
         # Computed from settings
         self.poll_sec = settings.traefik_poll_seconds
+        self.tout_sec = settings.traefik_timeout_seconds
         self.poll_url = f"{settings.traefik_poll_url}/api/http/routers"
 
-    def _is_valid_route(self, route):
+        # Providers filtering
+        self.excluded_providers = settings.traefik_excluded_providers
+
+        # Initialize the Poller
+        client = client or TimeoutSession(timeout=self.tout_sec)
+        super(TraefikPoller, self).__init__(logger, settings=settings, client=client)
+
+    def _is_valid_route(self, route: dict[str, Any]) -> bool:
         # Computed from settings
         required_keys = ["status", "name", "rule"]
         if any(key not in route for key in required_keys):
@@ -50,7 +52,7 @@ class TraefikPoller(DataPoller[requests.Session]):
         # Route is valid and enabled
         return True
 
-    def _is_valid_host(self, host):
+    def _is_valid_host(self, host: str) -> bool:
         if not any(pattern.match(host) for pattern in self.included_hosts):
             self.logger.debug(f"Traefik Router Host: {host} - Not Match with Include Hosts")
             return False
@@ -60,8 +62,8 @@ class TraefikPoller(DataPoller[requests.Session]):
         # Host is intended to be synced
         return True
 
-    def _validate(self, raw_data: list[dict]) -> tuple[list[str], PollerSource]:
-        data = []
+    def _validate(self, raw_data: list[dict[str, Any]]) -> tuple[list[str], PollerSourceType]:
+        data: list[str] = []
         for route in raw_data:
             # Check if route is whell formed
             if not self._is_valid_route(route):
@@ -74,6 +76,7 @@ class TraefikPoller(DataPoller[requests.Session]):
                 self.logger.info(f"Found Traefik Router: {route['name']} with Hostname {host}")
                 data.append(host)
         # Return a collection of zones to sync
+        assert "source" in self.config
         return data, self.config["source"]
 
     @override
@@ -81,7 +84,7 @@ class TraefikPoller(DataPoller[requests.Session]):
         try:
             while True:
                 self.logger.debug("Fetching routers from Traefik API")
-                self.events.set_data(await self.fetch())
+                self.events.set_data(await self.fetch())  # type: ignore
                 await self.events.emit()
                 await asyncio.sleep(self.poll_sec)
         except asyncio.CancelledError:
@@ -89,13 +92,18 @@ class TraefikPoller(DataPoller[requests.Session]):
             return
 
     @override
-    @async_backoff
-    def fetch(self) -> tuple[list[str, PollerSource]]:
+    async def fetch(self) -> tuple[list[str], PollerSourceType]:
+        stop = stop_after_attempt(self.config["stop"])
+        wait = wait_exponential(multiplier=self.config["wait"], max=self.tout_sec)
+        rawdata: Any = []
+        assert self._client
         try:
-            response = self.client.get(self.poll_url)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as err:
-            self.logger.error(f"Failed to fetch route from Traefik API: {err}")
-            raise BackoffError(self._validate([]))
+            async for attempt in AsyncRetrying(stop=stop, wait=wait):
+                with attempt:
+                    response = self._client.get(self.poll_url)
+                    response.raise_for_status()
+                    rawdata = response.json()
+        except RetryError as err:
+            self.logger.critical(f"Failed to fetch route from Traefik API: {err}")
         # Return a collection of routes
-        return self._validate(response.json())
+        return self._validate(rawdata)

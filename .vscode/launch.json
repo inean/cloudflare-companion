@@ -5,13 +5,16 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run with local .env file",
+            "name": "Run Main",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/src/cloudflare_companion.py",
+            "module": "dns_synchub",
             "console": "integratedTerminal",
-            "args": [ "--env-file", "${workspaceFolder}/.env" ],
-            "justMyCode": false
+            "args": [ "--env-file", "${workspaceFolder}/.env", "--dry-run" ],
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }

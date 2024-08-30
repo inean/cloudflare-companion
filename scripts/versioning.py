@@ -7,10 +7,10 @@ import sys
 import toml
 
 TOML_FILE = "pyproject.toml"
-DATA_FILE = "src/__about__.py"
+DATA_FILE = "src/dns_synchub/dns_synchub/__about__.py"
 
 
-def update_version(toml_file=None, data_file=None):
+def update_version(toml_file: str | None = None, data_file: str | None = None):
     # Get the current working directory
     current_dir = os.getcwd()
 

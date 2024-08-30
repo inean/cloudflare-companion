@@ -2,32 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
-from events import EventEmitter
-from mappers import Mapper
-from pollers import Poller, PollerSource
+from dns_synchub.settings import PollerSourceType
+
+from .events import EventEmitter
+from .mappers import Mapper
+from .pollers import Poller
 
 
 class DataManager:
     def __init__(self, *, logger: logging.Logger):
         self.logger = logger
-        self.tasks: list[asyncio.Task] = []
+        self.tasks: list[asyncio.Task[None]] = []
 
         # Subscribers
-        self.pollers: set[tuple[Poller, float]] = set()
-        self.mappers: EventEmitter[Mapper] = EventEmitter(logger, name="Manager")
+        self.pollers: set[tuple[Poller[Any], float]] = set()
+        self.mappers: EventEmitter[Mapper[Any]] = EventEmitter(logger, name="Manager")
 
         # Data
-        self.data: dict[PollerSource, list[str]] = {}
+        self.data: dict[PollerSourceType, list[str]] = {}
 
-    async def __call__(self, names: list[str], source: PollerSource):
+    async def __call__(self, names: list[str], source: PollerSourceType):
         # Store new data for mappers in each mappers queue
         self.mappers.set_data((names, source))
         # Combine data previously received from pollers
         self._combine_data({source: names})
         await self.mappers.emit()
 
-    def _combine_data(self, data: dict[PollerSource, list[str]]) -> dict[PollerSource, list[str]]:
+    def _combine_data(self, data: dict[PollerSourceType, list[str]]):
         """Combine data from multiple pollers."""
         for source, values in data.items():
             assert isinstance(values, list)
@@ -35,12 +38,12 @@ class DataManager:
             self.data[source].extend(values)
             self.data[source] = list(set(self.data[source]))
 
-    def add_poller(self, poller: Poller, backoff: float = 0):
+    def add_poller(self, poller: Poller[Any], backoff: float = 0):
         """Add a DataPoller to the manager."""
         assert not any(poller == p for p, _ in self.pollers)
         self.pollers.add((poller, backoff))
 
-    async def add_mapper(self, mapper: Mapper, backoff: float = 0):
+    async def add_mapper(self, mapper: Mapper[Any], backoff: float = 0):
         """Add a Mapper to the manager."""
         await self.mappers.subscribe(mapper, backoff=backoff)
 
@@ -78,7 +81,7 @@ class DataManager:
         """Aggregate and return the latest data from all pollers."""
         for poller, _ in self.pollers:
             try:
-                names, source = poller.events.get_data()
+                names, source = poller.events.get_data(self)
                 self._combine_data({source: names})
             except asyncio.QueueEmpty:
                 pass

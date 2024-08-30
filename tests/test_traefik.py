@@ -1,104 +1,44 @@
-import logging
-import re
+from logging import Logger
 from unittest.mock import MagicMock, patch
 
 import pytest
-from cloudflare_companion import check_traefik
-from settings import Settings
+from dns_synchub.pollers.traefik import TraefikPoller
+from dns_synchub.settings import Settings
+
+
+@pytest.fixture
+def settings():
+    return Settings(cf_token="token", dry_run=True)
 
 
 @pytest.fixture
 def mock_logger():
-    logger = logging.getLogger("cloudflare_companion")
-    return logger
+    return MagicMock(spec=Logger)
 
 
 @pytest.fixture
-def mock_settings():
-    settings = MagicMock(spec=Settings)
-    settings.traefik_poll_url = "http://mock-traefik/api"
-    settings.traefik_poll_seconds = 30
-    settings.traefik_timeout_seconds = 5
-    settings.traefik_filter = None
-    settings.traefik_filter_label = None
-    settings.traefik_included_hosts = [re.compile(".*")]
-    settings.traefik_excluded_hosts = []
-    return settings
-
-
-def test_check_traefik_no_routers(mock_settings, mock_logger):
-    with patch("requests.get") as mock_get:
+def mock_api_no_routers():
+    with patch("requests.Session.get") as mock_get:
         mock_get.return_value.ok = True
         mock_get.return_value.json.return_value = []
-
-        mappings = check_traefik(mock_settings, [], [], mock_logger)
-        assert mappings == {}
+        yield mock_get
 
 
-def test_check_traefik_no_matching_hosts(mock_settings, mock_logger):
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.ok = True
-        mock_get.return_value.json.return_value = [
-            {
-                "status": "enabled",
-                "name": "router1",
-                "rule": "Host(`nonmatching.com`)",
-            }
-        ]
-
-        mappings = check_traefik(mock_settings, [re.compile("example.com")], [], mock_logger)
-        assert mappings == {}
+@pytest.fixture
+def traefik_poller(mock_logger: MagicMock, settings: Settings):
+    return TraefikPoller(mock_logger, settings=settings)
 
 
-def test_check_traefik_matching_hosts(mock_settings, mock_logger):
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.ok = True
-        mock_get.return_value.json.return_value = [
-            {
-                "status": "enabled",
-                "name": "router1",
-                "rule": "Host(`example.com`)",
-            }
-        ]
-
-        mappings = check_traefik(mock_settings, [re.compile("example.com")], [], mock_logger)
-        assert mappings == {"example.com": 2}
+def test_init(mock_logger: MagicMock, settings: Settings):
+    poller = TraefikPoller(mock_logger, settings=settings)
+    assert poller.poll_sec == settings.traefik_poll_seconds
+    assert poller.tout_sec == settings.traefik_timeout_seconds
+    assert poller.poll_url == f"{settings.traefik_poll_url}/api/http/routers"
+    assert "docker" in poller.excluded_providers
 
 
-def test_check_traefik_multiple_matching_hosts(mock_settings, mock_logger):
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.ok = True
-        mock_get.return_value.json.return_value = [
-            {
-                "status": "enabled",
-                "name": "router1",
-                "rule": "Host(`example.com`) || Host(`another.com`)",
-            }
-        ]
-
-        domains = ["example.com", "another.com"]
-        compiled_domains = list(map(re.compile, domains))
-
-        mappings = check_traefik(mock_settings, compiled_domains, [], mock_logger)
-        assert mappings == {"another.com": 2, "example.com": 2}
-
-
-def test_check_traefik_excluded_hosts(mock_settings, mock_logger):
-    with patch("requests.get") as mock_get:
-        mock_get.return_value.ok = True
-        mock_get.return_value.json.return_value = [
-            {
-                "status": "enabled",
-                "name": "router1",
-                "rule": "Host(`example.com`)",
-            }
-        ]
-
-        # Compile the domains using map and re.compile
-        compiled_domains = list(map(re.compile, ["example.com"]))
-        compiled_excluded_domains = list(map(re.compile, ["example.com"]))
-
-        mappings = check_traefik(
-            mock_settings, compiled_domains, compiled_excluded_domains, mock_logger
-        )
-        assert mappings == {}
+@pytest.mark.asyncio
+async def test_no_routers(traefik_poller: TraefikPoller, mock_api_no_routers: MagicMock):
+    hosts, source = await traefik_poller.fetch()
+    assert source == "traefik"
+    assert hosts == []

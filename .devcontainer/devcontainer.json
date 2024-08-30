@@ -19,18 +19,14 @@
             "extensions": [
                 // Python exrtensions
                 "charliermarsh.ruff",
-                "codezombiech.gitignore",
                 "exiasr.hadolint",
                 "kevinrose.vsc-python-indent",
-                "mosapride.zenkaku",
                 "ms-azuretools.vscode-docker",
                 "ms-python.python",
                 "ms-vscode-remote.remote-containers",
-                "njpwerner.autodocstring",
                 "shardulm94.trailing-spaces",
                 "usernamehw.errorlens",
                 "yzhang.markdown-all-in-one"
-
                 // Project related extensions
             ],
             "settings": {
@@ -57,7 +53,17 @@
     },
 
     // Forward traefik dashboard port
-    "forwardPorts": [ 8080 ],
+    "forwardPorts": [ 3000, 8080 ],
+    "portsAttributes": {
+        "3000": {
+            "label": "Traefik Proxy",
+            "onAutoForward": "notify"
+        },
+        "8080": {
+            "label": "Traefik Dashboard",
+            "onAutoForward": "notify"
+        }
+    },
 
     // Use 'postCreateCommand' to run commands after the container is created.
     "postCreateCommand": "rye sync -f",
