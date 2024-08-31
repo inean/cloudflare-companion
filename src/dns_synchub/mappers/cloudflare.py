@@ -76,7 +76,9 @@ class CloudFlareMapper(Mapper[CloudFlare]):
     async def get_records(self, zone_id: str, **filter: str) -> list[dict[str, Any]]:
         async def _get() -> list[dict[str, Any]]:
             assert self.client is not None
-            return self.client.zones.dns_records.get(zone_id, params=filter)  # type: ignore
+            return await asyncio.to_thread(
+                self.client.zones.dns_records.get, zone_id, params=filter
+            )
 
         return await self._retry(_get)
 
@@ -85,7 +87,7 @@ class CloudFlareMapper(Mapper[CloudFlare]):
             if self.dry_run:
                 self.logger.info(f"DRY-RUN: Create new record in zone {zone_id}:, {data}")
                 return {**data, "zone_id": zone_id}
-            result = self.client.zones.dns_records.post(zone_id, data=data)  # type: ignore
+            result = await asyncio.to_thread(self.client.zones.dns_records.post, zone_id, data=data)
             self.logger.info(f"Created new record in zone {zone_id}: {result}")
             return cast(dict[str, Any], result)
 
@@ -96,7 +98,9 @@ class CloudFlareMapper(Mapper[CloudFlare]):
             if self.dry_run:
                 self.logger.info(f"DRY-RUN: Update record {record_id } in zone {zone_id}:, {data}")
                 return {**data, "zone_id": zone_id}
-            result = self.client.zones.dns_records.put(zone_id, record_id, data=data)  # type: ignore
+            result = await asyncio.to_thread(
+                self.client.zones.dns_records.put, zone_id, record_id, data=data
+            )
             self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
             return cast(dict[str, Any], result)
 

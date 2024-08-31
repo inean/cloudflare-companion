@@ -100,7 +100,7 @@ class TraefikPoller(Poller[Session]):
         try:
             async for attempt in AsyncRetrying(stop=stop, wait=wait):
                 with attempt:
-                    response = self._client.get(self.poll_url)
+                    response = await asyncio.to_thread(self._client.get, self.poll_url)
                     response.raise_for_status()
                     rawdata = response.json()
         except RetryError as err:
