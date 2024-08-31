@@ -143,12 +143,12 @@ class DockerPoller(Poller[DockerClient]):
             kwargs = {"since": since, "until": until, "filters": filter, "decode": True}
             events = None
             try:
-                events: Any = self.client.events(**kwargs)  # type: ignore
+                events: Any = await asyncio.to_thread(self.client.events, **kwargs)  # type: ignore
                 for event in events:
                     if "id" not in event:
                         self.logger.warning("Container ID is None. Skipping container.")
                         continue
-                    raw_data = self.client.containers.get(event["id"])
+                    raw_data = await asyncio.to_thread(self.client.containers.get, event["id"])
                     services = [DockerContainer(raw_data, logger=self.logger)]
                     self.events.set_data(self._validate(services))
             except NotFound:
@@ -158,7 +158,7 @@ class DockerPoller(Poller[DockerClient]):
                 self.logger.info("Dokcker polling cancelled. Performing cleanup.")
                 return
             finally:
-                _ = events and events.close()
+                _ = events and await asyncio.to_thread(events.close)
 
     @override
     async def fetch(self) -> tuple[list[str], PollerSourceType]:
@@ -169,7 +169,10 @@ class DockerPoller(Poller[DockerClient]):
         try:
             async for attempt in AsyncRetrying(stop=stop, wait=wait):
                 with attempt:
-                    raw_data = cast(list[Container], self.client.containers.list(filters=filters))  # type: ignore
+                    raw_data = cast(
+                        list[Container],
+                        await asyncio.to_thread(self.client.containers.list, filters=filters),
+                    )
                     rawdata = [DockerContainer(c, logger=self.logger) for c in raw_data]
         except RetryError as err:
             self.logger.critical(f"Could not fetch containers: {err}")
