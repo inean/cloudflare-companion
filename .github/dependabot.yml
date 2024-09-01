@@ -4,13 +4,18 @@ updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
-    commit-message:
-      prefix: "chore(rye)"
+      interval: daily
+      time: "08:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 10
+    allow:
+      - dependency-name: "*"
+        dependency-type: "all"
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
+      nterval: daily
+      time: "08:00"
+      timezone: "Europe/Madrid"
       interval: weekly
-    commit-message:
-      prefix: "chore(github-actions)"
