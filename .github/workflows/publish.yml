@@ -68,7 +68,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            name=${{ env.IMAGE_NAME }}
             name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
@@ -85,6 +84,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           push: ${{ !env.ACT && github.event_name != 'pull_request' }}
           build-args: |
             PYTHON_VERSION=${{ env.PYTHON_VERSION }}
