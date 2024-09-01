@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial, wraps
 from logging import Logger
 from typing import Any, Awaitable, Callable, cast
 
@@ -22,6 +23,49 @@ from dns_synchub.settings import DomainsModel, PollerSourceType, Settings
 
 class CloudFlareException(Exception):
     pass
+
+
+def dry_run(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    @wraps(func)
+    async def wrapper(self: CloudFlareMapper, zone_id: str, *args: Any, **data: Any) -> Any:
+        if self.dry_run:
+            self.logger.info(f"DRY-RUN: {func.__name__} in zone {zone_id}:, {data}")
+            return {**data, "zone_id": zone_id}
+        return await func(self, zone_id, *args, **data)
+
+    return wrapper
+
+
+def retry(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    def log_before_sleep(logger, retry_state: RetryCallState):
+        assert retry_state.next_action
+        sleep_time = retry_state.next_action.sleep
+        logger.warning(f"Max Rate limit reached. Retry in {sleep_time} seconds...")
+
+    @wraps(func)
+    async def wrapper(self: CloudFlareMapper, *args: Any, **kwargs: Any) -> Any:
+        assert isinstance(self, CloudFlareMapper)
+
+        retry = AsyncRetrying(
+            stop=stop_after_attempt(self.config["stop"]),
+            wait=wait_exponential(multiplier=self.config["wait"], max=self.tout_sec),
+            retry=retry_if_exception_message(match="Rate limited"),
+            before_sleep=partial(log_before_sleep, self.logger),
+        )
+        try:
+            async for attempt_ctx in retry:
+                with attempt_ctx:
+                    try:
+                        return await func(self, *args, **kwargs)
+                    except Exception as err:
+                        att = attempt_ctx.retry_state.attempt_number
+                        self.logger.debug(f"CloduFlare {func.__name__} attempt {att} failed:{err}")
+                        raise
+        except RetryError as err:
+            last_error = err.last_attempt.result()
+            raise CloudFlareException("Operation failed") from last_error
+
+    return wrapper
 
 
 class CloudFlareMapper(Mapper[CloudFlare]):
@@ -54,57 +98,28 @@ class CloudFlareMapper(Mapper[CloudFlare]):
                 task.cancel()
             raise
 
-    async def _retry(self, func: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
-        def log_before_sleep(retry_state: RetryCallState):
-            sleep_time = retry_state.upcoming_sleep
-            self.logger.warning(f"Max Rate limit reached. Retry in {sleep_time} seconds...")
-
-        retry = AsyncRetrying(
-            stop=stop_after_attempt(self.config["stop"]),
-            wait=wait_exponential(multiplier=self.config["wait"], max=self.tout_sec),
-            retry=retry_if_exception_message(match="Rate limited"),
-            before_sleep=log_before_sleep,
-        )
-        try:
-            async for attempt in retry:
-                with attempt:
-                    return await func(*args, **kwargs)
-        except RetryError as err:
-            last_error = err.last_attempt.result()
-            raise CloudFlareException("Operation failed") from last_error
-
+    @retry
     async def get_records(self, zone_id: str, **filter: str) -> list[dict[str, Any]]:
-        async def _get() -> list[dict[str, Any]]:
-            assert self.client is not None
-            return await asyncio.to_thread(
-                self.client.zones.dns_records.get, zone_id, params=filter
-            )
+        assert self.client is not None
+        return await asyncio.to_thread(self.client.zones.dns_records.get, zone_id, params=filter)
 
-        return await self._retry(_get)
-
+    @dry_run
+    @retry
     async def post_record(self, zone_id: str, **data: str) -> dict[str, Any]:
-        async def _post() -> dict[str, Any]:
-            if self.dry_run:
-                self.logger.info(f"DRY-RUN: Create new record in zone {zone_id}:, {data}")
-                return {**data, "zone_id": zone_id}
-            result = await asyncio.to_thread(self.client.zones.dns_records.post, zone_id, data=data)
-            self.logger.info(f"Created new record in zone {zone_id}: {result}")
-            return cast(dict[str, Any], result)
+        assert self.client is not None
+        result = await asyncio.to_thread(self.client.zones.dns_records.post, zone_id, data=data)
+        self.logger.info(f"Created new record in zone {zone_id}: {result}")
+        return result
 
-        return await self._retry(_post)
-
+    @dry_run
+    @retry
     async def put_record(self, zone_id: str, record_id: str, **data: str) -> dict[str, Any]:
-        async def _put() -> dict[str, Any]:
-            if self.dry_run:
-                self.logger.info(f"DRY-RUN: Update record {record_id } in zone {zone_id}:, {data}")
-                return {**data, "zone_id": zone_id}
-            result = await asyncio.to_thread(
-                self.client.zones.dns_records.put, zone_id, record_id, data=data
-            )
-            self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
-            return cast(dict[str, Any], result)
-
-        return await self._retry(_put)
+        assert self.client is not None
+        result = await asyncio.to_thread(
+            self.client.zones.dns_records.put, zone_id, record_id, data=data
+        )
+        self.logger.info(f"Updated record {record_id} in zone {zone_id} with data {data}")
+        return result
 
     # Start Program to update the Cloudflare
     @override

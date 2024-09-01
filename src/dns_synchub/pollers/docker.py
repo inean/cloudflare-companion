@@ -162,19 +162,23 @@ class DockerPoller(Poller[DockerClient]):
 
     @override
     async def fetch(self) -> tuple[list[str], PollerSourceType]:
+        filters = {"status": "running"}
         stop = stop_after_attempt(self.config["stop"])
         wait = wait_exponential(multiplier=self.config["wait"], max=self.tout_sec)
-        rawdata = []
-        filters = {"status": "running"}
+        raw_data = []
         try:
-            async for attempt in AsyncRetrying(stop=stop, wait=wait):
-                with attempt:
-                    raw_data = cast(
-                        list[Container],
-                        await asyncio.to_thread(self.client.containers.list, filters=filters),
-                    )
-                    rawdata = [DockerContainer(c, logger=self.logger) for c in raw_data]
+            async for attempt_ctx in AsyncRetrying(stop=stop, wait=wait):
+                with attempt_ctx:
+                    try:
+                        containers = self.client.containers
+                        raw_data = await asyncio.to_thread(containers.list, filters=filters)
+                        result = [DockerContainer(c, logger=self.logger) for c in raw_data]
+                    except Exception as err:
+                        att = attempt_ctx.retry_state.attempt_number
+                        self.logger.debug(f"Docker.fetch attempt {att} failed: {err}")
+                        raise
         except RetryError as err:
-            self.logger.critical(f"Could not fetch containers: {err}")
+            last_error = err.last_attempt.result()
+            self.logger.critical(f"Could not fetch containers: {last_error}")
         # Return a collection of routes
-        return self._validate(rawdata)
+        return self._validate(result)

@@ -95,15 +95,21 @@ class TraefikPoller(Poller[Session]):
     async def fetch(self) -> tuple[list[str], PollerSourceType]:
         stop = stop_after_attempt(self.config["stop"])
         wait = wait_exponential(multiplier=self.config["wait"], max=self.tout_sec)
-        rawdata: Any = []
+        rawdata = []
         assert self._client
         try:
-            async for attempt in AsyncRetrying(stop=stop, wait=wait):
-                with attempt:
-                    response = await asyncio.to_thread(self._client.get, self.poll_url)
-                    response.raise_for_status()
-                    rawdata = response.json()
+            async for attempt_ctx in AsyncRetrying(stop=stop, wait=wait):
+                with attempt_ctx:
+                    try:
+                        response = await asyncio.to_thread(self._client.get, self.poll_url)
+                        response.raise_for_status()
+                        rawdata = response.json()
+                    except Exception as err:
+                        att = attempt_ctx.retry_state.attempt_number
+                        self.logger.debug(f"Traefik.fetch attempt {att} failed: {err}")
+                        raise
         except RetryError as err:
-            self.logger.critical(f"Failed to fetch route from Traefik API: {err}")
+            last_error = err.last_attempt.result()
+            self.logger.critical(f"Failed to fetch route from Traefik API: {last_error}")
         # Return a collection of routes
         return self._validate(rawdata)
