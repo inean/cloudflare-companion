@@ -27,14 +27,6 @@ pull_request_rules:
       queue:
         name: dep-update
 
-  - name: Automatically Merge Queued PRs
-    conditions:
-      - queue=dep-update
-      - "#approved-reviews-by>=1"
-    actions:
-      merge:
-        method: squash
-
   - name: Delete head branch after merge but not if other PRs depend on it
     conditions:
       - merged-at < 1 day ago
