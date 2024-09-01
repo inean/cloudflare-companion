@@ -6,7 +6,7 @@ queue_rules:
       - check-success = format
       - check-success = tests
     merge_conditions:
-      - "#approved-reviews-by >= 1"
+      - "#approved-reviews-by>=1"
       - check-success = container
 
   - name: dep-update
@@ -14,6 +14,9 @@ queue_rules:
     queue_conditions:
       - author=dependabot[bot]
       - check-success=tests
+    merge_conditions:
+      - "#approved-reviews-by>=1"
+    merge_method: squash
 
 pull_request_rules:
   - name: Automatically Merge from Dependabot PRs
