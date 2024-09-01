@@ -1,0 +1,35 @@
+---
+queue_rules:
+  - name: default
+    queue_conditions:
+      - check-success = lint
+      - check-success = format
+      - check-success = tests
+    merge_conditions:
+      - "#approved-reviews-by>=1"
+      - check-success = container
+
+  - name: dep-update
+    batch_size: 10
+    queue_conditions:
+      - author=dependabot[bot]
+      - check-success=tests
+    merge_conditions:
+      - "#approved-reviews-by>=1"
+    merge_method: squash
+
+pull_request_rules:
+  - name: Automatically Merge from Dependabot PRs
+    conditions:
+      - check-success=tests
+      - author=dependabot[bot]
+    actions:
+      queue:
+        name: dep-update
+
+  - name: Delete head branch after merge but not if other PRs depend on it
+    conditions:
+      - merged-at < 1 day ago
+    actions:
+      delete_head_branch:
+        force: false
