@@ -2,17 +2,8 @@ import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, model_validator
-from pydantic_settings import BaseSettings, EnvSettingsSource, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
-
-# Inject custom methods into EventSettingsSource tu get support for:
-# - _FIELD  like env vars
-# -  List based submodules so FOO__0__KEY=VALUE will be converted to FOO=[{'KEY': 'VALUE'}]
-#
-from .internal._settings import _EnvSettingsSource  # type:ignore
-
-EnvSettingsSource.get_field_value = _EnvSettingsSource.get_field_value  # type:ignore
-EnvSettingsSource.explode_env_vars = _EnvSettingsSource.explode_env_vars  # type:ignore
 
 # Define the type alias
 RecordType = Literal["A", "AAAA", "CNAME"]

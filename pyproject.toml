@@ -5,8 +5,7 @@ authors = [
 dependencies = [
     "cloudflare < 3.0",
     "docker>=7.1.0",
-    "pydantic-settings>=2.3.4",
-    "pydantic-settings-file-envar>=0.1.0",
+    "pydantic-settings @ git+https://github.com/inean/pydantic-settings@2.3",
     "asyncio>=3.4.3",
     "python-dotenv>=1.0.1",
     "tenacity>=9.0.0",
