@@ -20,8 +20,6 @@ charset-normalizer==3.3.2
     # via requests
 cloudflare==2.19.4
 docker==7.1.0
-exceptiongroup==1.2.2
-    # via pydantic-settings-file-envar
 idna==3.7
     # via requests
 jsonlines==4.0.0
@@ -30,9 +28,7 @@ pydantic==2.8.2
     # via pydantic-settings
 pydantic-core==2.20.1
     # via pydantic
-pydantic-settings==2.3.4
-    # via pydantic-settings-file-envar
-pydantic-settings-file-envar==0.1.0
+pydantic-settings @ git+https://github.com/inean/pydantic-settings@209f3fcc0d6908a5b2a81e59ad2f97d317ccaf2d
 python-dotenv==1.0.1
     # via pydantic-settings
 pyyaml==6.0.1
