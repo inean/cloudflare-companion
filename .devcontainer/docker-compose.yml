@@ -7,6 +7,7 @@ services:
       dockerfile: .devcontainer/Dockerfile
     environment:
       - PYTHONUNBUFFERED=1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=telemetry:4317
     volumes:
       - "..:/workspace:cached"
     cap_add:
@@ -17,6 +18,7 @@ services:
       - label=disable
       - apparmor=unconfined
     depends_on:
+      - telemetry
       - traefik
       - whoami
     # Override the default command so things don't shut down after the process ends.
@@ -41,6 +43,24 @@ services:
       - "seccomp=unconfined"
       - "label=disable"
       - "apparmor=unconfined"
+
+  telemetry:
+    image: otel/opentelemetry-collector:latest
+    container_name: telemetry
+    volumes:
+      - ./opentelemetry.yml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
 
   whoami:
     image: "containous/whoami"
