@@ -77,6 +77,14 @@
         "8080": {
             "label": "Traefik Dashboard",
             "onAutoForward": "notify"
+        },
+        "4317": {
+            "label": "Telemetry",
+            "onAutoForward": "notify"
+        },
+        "9090": {
+            "label": "Prometheus",
+            "onAutoForward": "notify"
         }
     },
 
