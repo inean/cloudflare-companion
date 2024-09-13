@@ -3,14 +3,13 @@
 import argparse
 import os
 import sys
+import tomllib
 
-import toml
-
-TOML_FILE = "pyproject.toml"
-DATA_FILE = "src/dns_synchub/__about__.py"
+TOML_FILE = 'pyproject.toml'
+DATA_FILE = 'src/dns_synchub/__about__.py'
 
 
-def update_version(toml_file: str | None = None, data_file: str | None = None):
+def update_version(toml_file: str | None = None, data_file: str | None = None) -> None:
     # Get the current working directory
     current_dir = os.getcwd()
 
@@ -23,39 +22,39 @@ def update_version(toml_file: str | None = None, data_file: str | None = None):
         sys.stderr.write(f"Source file '{toml_file}' not found\n")
         sys.exit(1)
     if not os.path.exists(data_file):
-        sys.stderr.write(f"Destination File {data_file} not found\n")
+        sys.stderr.write(f'Destination File {data_file} not found\n')
         sys.exit(1)
 
     # Read the version from pyproject.toml
-    with open(toml_file, "r") as f:
-        pyproject_data = toml.load(f)
+    with open(toml_file, 'rb') as f:
+        pyproject_data = tomllib.load(f)
     # Read the current contents of __about__.py
-    with open(data_file, "r") as f:
+    with open(data_file) as f:
         lines = f.readlines()
 
     # Update the version in __about__.py
-    with open(data_file, "w") as f:
-        version = pyproject_data["project"]["version"]
+    with open(data_file, 'w') as f:
+        version = pyproject_data['project']['version']
         for line in lines:
-            line = f'__version__ = "{version}"\n' if line.startswith("__version__") else line
+            line = f"__version__ = '{version}'\n" if line.startswith('__version__') else line
             f.write(line)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Update version in destination file from source file.",
+        description='Update version in destination file from source file.',
     )
     parser.add_argument(
-        "--source",
+        '--source',
         type=str,
         default=TOML_FILE,
-        help=f"PyProject file to read version from ({TOML_FILE})",
+        help=f'PyProject file to read version from ({TOML_FILE})',
     )
     parser.add_argument(
-        "--target",
+        '--target',
         type=str,
         default=DATA_FILE,
-        help=f"Python Destination file to update version in ({DATA_FILE})",
+        help=f'Python Destination file to update version in ({DATA_FILE})',
     )
     args = parser.parse_args()
 

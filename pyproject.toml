@@ -40,6 +40,8 @@ dns-synchub = "dns_synchub:main"
 
 [tool.uv]
 dev-dependencies = [
+    # lint
+    "mypy>=1.11.2",
     "pre-commit>=3.7.1",
     "pyupgrade>=3.16.0",
     "ruff>=0.5.4",
@@ -69,7 +71,9 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
-source = 'dns_synchub'
+source = [
+    'dns_synchub',
+]
 context = '${CONTEXT}'
 
 [tool.coverage.report]
@@ -83,7 +87,9 @@ exclude_lines = [
 ]
 
 [tool.coverage.paths]
-source = 'src/dns_synchub/'
+source = [
+    'src/dns_synchub/',
+]
 
 [tool.ruff]
 # set max-line-length to 100
@@ -150,3 +156,36 @@ keep-runtime-typing = true
 [tool.deptry]
 root = 'src/dns_synchub'
 
+[tool.mypy]
+mypy_path = "types"
+files = [
+    "src/",
+    "tests/",
+]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+namespace_packages = true
+no_implicit_reexport = true
+python_version = '3.11'
+show_error_codes = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+
+# for strict mypy: (this is the tricky one :-))
+disallow_untyped_defs = true
+
+# remaining arguments from `mypy --strict` which cause errors
+# no_implicit_optional = true
+# warn_return_any = true
+
+[[tool.mypy.overrides]]
+module = [
+    'dotenv.*',
+]
+ignore_missing_imports = true

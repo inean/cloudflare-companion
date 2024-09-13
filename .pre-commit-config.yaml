@@ -37,7 +37,12 @@ repos:
         pass_filenames: false
         stages: [commit]
         files: ^pyproject\.toml$
-        additional_dependencies: [toml]
+
+      - id: mypy
+        name: mypy
+        language: system
+        types: [python]
+        entry: uv run mypy --strict
 
       - id: pyupgrade
         name: Pyupgrade
