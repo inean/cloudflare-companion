@@ -26,16 +26,13 @@ runs:
         python-version: ${{ inputs.python-version }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v2
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      shell: bash
 
     - name: Pin Python Version
       run: |
         export PYTHONUNBUFFERED=True
         uv python pin ${{ steps.extract-python-version.outputs.python-version }}
-      shell: bash
-
-    - name: Install dependencies
-      run: uv sync ${{ inputs.uv-sync-options}}
       shell: bash
 
     - name: Normalize UV Sync Options
@@ -50,3 +47,7 @@ runs:
       with:
         path: ~/.cache/uv
         key: ${{ runner.os }}-python-${{ steps.extract-python-version.outputs.python-version }}-uv-sync-${{ env.normalized-uv-sync-options }}
+
+    - name: Install dependencies
+      run: uv sync ${{ inputs.uv-sync-options}}
+      shell: bash

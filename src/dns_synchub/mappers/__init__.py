@@ -1,8 +1,18 @@
-import logging
-from abc import ABC, abstractmethod
-from typing import Generic, TypedDict, TypeVar
+from abc import ABC
+from logging import Logger
+from typing import Generic, Protocol, TypedDict, TypeVar, runtime_checkable
 
-from dns_synchub.settings import DomainsModel, PollerSourceType, Settings
+from dns_synchub.settings import Settings
+from dns_synchub.types import DomainsModel, EventSubscriber
+
+T = TypeVar('T')  # Client backemd
+E = TypeVar('E')  # Event type accepted
+R = TypeVar('R')  # Result type
+
+
+@runtime_checkable
+class MapperProtocol(EventSubscriber[E], Protocol[E, R]):
+    async def sync(self, data: E) -> list[R] | None: ...
 
 
 class MapperConfig(TypedDict):
@@ -14,31 +24,21 @@ class MapperConfig(TypedDict):
     """Delay in seconds before syncing mappings"""
 
 
-class BaseMapper(ABC):
+class BaseMapper(ABC, MapperProtocol[E, R], Generic[E, R]):
     config: MapperConfig = {
-        "stop": 3,
-        "wait": 4,
-        "delay": 0,
+        'stop': 3,
+        'wait': 4,
+        'delay': 0,
     }
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(self, logger: Logger):
         self.logger = logger
-        self.mappings = {}
-
-    @abstractmethod
-    async def __call__(self, hosts: list[str], source: PollerSourceType): ...
-
-    @abstractmethod
-    async def sync(self, host: str, source: PollerSourceType) -> DomainsModel | None: ...
 
 
-T = TypeVar("T")
-
-
-class Mapper(BaseMapper, Generic[T]):
-    def __init__(self, logger: logging.Logger, *, settings: Settings, client: T | None = None):
+class Mapper(BaseMapper[E, DomainsModel], Generic[E, T]):
+    def __init__(self, logger: Logger, *, settings: Settings, client: T | None = None):
         # init client
-        self.client: T | None = client
+        self._client: T | None = client
 
         # Domain defaults
         self.dry_run = settings.dry_run
@@ -50,9 +50,14 @@ class Mapper(BaseMapper, Generic[T]):
         self.included_hosts = settings.included_hosts
         self.excluded_hosts = settings.excluded_hosts
 
-        super(Mapper, self).__init__(logger)
+        super().__init__(logger)
+
+    @property
+    def client(self) -> T:
+        assert self._client is not None, 'Client is not initialized'
+        return self._client
 
 
 from dns_synchub.mappers.cloudflare import CloudFlareMapper  # noqa: E402
 
-__all__ = ["CloudFlareMapper"]
+__all__ = ['CloudFlareMapper']

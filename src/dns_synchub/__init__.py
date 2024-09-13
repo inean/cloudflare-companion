@@ -1,38 +1,26 @@
-from __future__ import annotations
+# src/dns_synchub/__init__.py
 
-import asyncio
-import sys
+from .__about__ import __version__ as VERSION
+from .logger import get_logger, initialize_logger
+from .mappers import CloudFlareMapper
+from .pollers import DockerPoller, TraefikPoller
+from .settings import Settings
 
-from pydantic import ValidationError
+__version__ = VERSION
 
-import dns_synchub.cli as cli
-import dns_synchub.logger as logger
-import dns_synchub.settings as settings
+__all__ = [
+    # logger subpackage
+    'get_logger',
+    'initialize_logger',
+    # settings subpackage
+    'Settings',
+    # pollers subpackage
+    'DockerPoller',
+    'TraefikPoller',
+    # mappers subpackage
+    'CloudFlareMapper',
+]
 
 
-def main():
-    try:
-        # Load environment variables from the specified env file
-        cli.parse_args()
-
-        # Load settings
-        options = settings.Settings()
-
-        # Check for uppercase docker secrets or env variables
-        assert options.cf_token
-        assert options.target_domain
-        assert len(options.domains) > 0
-
-    except ValidationError as e:
-        print(f"Unable to load settings: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # Set up logging and dump runtime settings
-    log = logger.report_current_status_and_settings(logger.get_logger(options), options)
-    try:
-        asyncio.run(cli.main(log, settings=options))
-    except KeyboardInterrupt:
-        # asyncio.run will cancel any task pending when the main function exits
-        log.info("Cancel by user.")
-        log.info("Exiting...")
-        sys.exit(1)
+def __dir__() -> 'list[str]':
+    return list(__all__)
