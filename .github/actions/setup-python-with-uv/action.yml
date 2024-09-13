@@ -1,0 +1,52 @@
+---
+name: Setup uv
+description: Install Python with uv
+
+inputs:
+  python-version:
+    description: Python version
+    required: false
+  uv-sync-options:
+    description: Options to pass to uv sync
+    required: false
+    default: "--dev --all-extras"
+
+outputs:
+  python-version:
+    description: The Python version used
+    value: ${{ steps.extract-python-version.outputs.python-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Extract Python Version
+      id: extract-python-version
+      uses: ./.github/actions/extract-python-version
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+
+    - name: Pin Python Version
+      run: |
+        export PYTHONUNBUFFERED=True
+        uv python pin ${{ steps.extract-python-version.outputs.python-version }}
+      shell: bash
+
+    - name: Install dependencies
+      run: uv sync ${{ inputs.uv-sync-options}}
+      shell: bash
+
+    - name: Normalize UV Sync Options
+      id: normalize-uv-sync-options
+      run: |
+        NORMALIZED_UV_SYNC_OPTIONS=$(echo "${{ inputs.uv-sync-options }}" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' '-')
+        echo "normalized-uv-sync-options=$NORMALIZED_UV_SYNC_OPTIONS" >> $GITHUB_ENV
+      shell: bash
+
+    - uses: actions/cache@v4
+      id: cache-uv
+      with:
+        path: ~/.cache/uv
+        key: ${{ runner.os }}-python-${{ steps.extract-python-version.outputs.python-version }}-uv-sync-${{ env.normalized-uv-sync-options }}

@@ -1,13 +1,7 @@
 ---
 name: Code CI
 
-on:
-
-  push:
-    branches: [ main ]
-
-  pull_request:
-    branches: [ main ]
+on: [push, pull_request]
 
 jobs:
   lint:
@@ -16,11 +10,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python with Rye
-        uses: ./.github/actions/setup-python-with-rye
+      - name: Setup Python with uv
+        uses: ./.github/actions/setup-python-with-uv
 
       - name: Lint
-        run: rye run ruff check --output-format=github .
+        run: uv run ruff check --output-format=github .
 
   format:
     runs-on: ubuntu-latest
@@ -28,28 +22,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python with Rye
-        uses: ./.github/actions/setup-python-with-rye
+      - name: Setup Python with uv
+        uses: ./.github/actions/setup-python-with-uv
 
       - name: Format
-        run: rye run ruff format . --check --diff
+        run: uv run ruff format . --check --diff
 
   tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.11', '3.12']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python ${{ matrix.python-version }} with Rye
-        uses: ./.github/actions/setup-python-with-rye
+      - name: Setup Python ${{ matrix.python-version }} with uv
+        uses: ./.github/actions/setup-python-with-uv
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Run Pytest if directory exists
-        run:  rye run pytest --cov=src --cov-report=xml  --junitxml=junit.xml
+        run:  uv run pytest --cov=src --cov-report=xml  --junitxml=junit.xml
 
       - name: Upload test results to Codecov
         if: ${{ !env.ACT  }}
