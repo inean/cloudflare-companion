@@ -1,5 +1,5 @@
 # Global args
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.11
 ARG APP_PATH=/app
 ARG VIRTUAL_ENV_PATH=.venv
 
@@ -16,16 +16,18 @@ RUN <<EOF
     apt-get install --no-install-recommends -y git
 EOF
 
+# hadolint ignore=DL3013
+RUN pip install --no-cache-dir uv
+
 # Set the working directory:
 WORKDIR ${APP_PATH}
 
-# Set a Virtual env
-RUN python3 -m venv "${APP_PATH}/${VIRTUAL_ENV_PATH}"
-ENV PATH="${APP_PATH}/${VIRTUAL_ENV_PATH}/bin:$PATH"
+# Copy and install dependencies using uv:
+COPY uv.lock .
+RUN uv sync --locked --link-mode copy --no-cache --compile-bytecode --no-dev --all-extras
 
-# Copy and install dependencies:
-COPY requirements.lock .
-RUN PYTHONDONTWRITEBYTECODE=1 pip install --no-cache-dir -r requirements.lock
+# Set a Virtual env
+ENV PATH="${APP_PATH}/${VIRTUAL_ENV_PATH}/bin:$PATH"
 
 # Copy the application source code:
 COPY src .

@@ -1,19 +1,25 @@
+---
 default_stages: [commit]
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.3.5
+    rev: v0.6.4
     hooks:
-    - id: ruff
-      name: Ruff check
-      description: "Run 'ruff check' for extremely fast Python linting"
-      args: [ --fix ]
-
-    - id: ruff-format
-      name: Ruff format
-      description: "Run 'ruff format' for extremely fast Python formatting"
+      - id: ruff
+        name: Ruff linter
+        args: [--fix]
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: Ruff format
+        types_or: [python, pyi]
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.13
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-ruff
 
   - repo: https://github.com/hadolint/hadolint
-    rev: v2.12.0
+    rev: v2.13.0-beta
     hooks:
       - id: hadolint
         name: Lint Dockerfiles
@@ -32,3 +38,15 @@ repos:
         stages: [commit]
         files: ^pyproject\.toml$
         additional_dependencies: [toml]
+
+      - id: pyupgrade
+        name: Pyupgrade
+        entry: pyupgrade --py311-plus
+        types: [python]
+        language: system
+
+      - id: deptry
+        name: Deptry
+        entry: deptry src tests
+        language: system
+        pass_filenames: false

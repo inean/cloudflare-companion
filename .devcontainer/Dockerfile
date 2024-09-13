@@ -1,42 +1,38 @@
 # Builder image
 FROM debian:bookworm-slim AS builder
 
+LABEL maintainer="inean <inean.es+contact@gmail.com>"
+
 # hadolint ignore=DL3008
 RUN <<EOF
     apt-get update
     apt-get install -y --no-install-recommends ca-certificates curl
 EOF
 
-# Install and initialize rye
-ENV RYE_HOME="/opt/rye"
-ENV PATH="$RYE_HOME/shims:$PATH"
+# Download the latest installer
+ADD https://astral.sh/uv/install.sh uv-installer.sh
 
-# hadolint ignore=DL4006
-RUN <<EOF
-    curl -sSf https://rye.astral.sh/get | RYE_INSTALL_OPTION="--yes" bash
-    rye config --set-bool behavior.global-python=true
-    rye config --set-bool behavior.use-uv=true
-EOF
-
-# Copy project
-WORKDIR /opt
-
-# Find pinned python version on current project and download it
-COPY ./.python-version ./
-RUN rye pin "$(cat .python-version)"
+# Run the installer then remove it
+RUN sh uv-installer.sh
 
 # Devcontainer image
 FROM mcr.microsoft.com/vscode/devcontainers/base:bookworm
-COPY --from=builder /opt/rye /opt/rye
 
-ENV RYE_HOME="/opt/rye"
-ENV PATH="$RYE_HOME/shims:$PATH"
+# Set uv
+ENV UV_HOME="/opt/.cargo/bin"
+ENV PATH="$UV_HOME/:$PATH"
+COPY --from=builder /root/.cargo/bin/uv $UV_HOME/uv
+
+# Configure uv behavior
 ENV PYTHONUNBUFFERED=True
+ENV UV_LINK_MODE=copy
 
-# Use rye as the default python and uv as default package manager
-RUN <<EOF
-    rye config --set-bool behavior.global-python=true
-    rye config --set-bool behavior.use-uv=true
-EOF
+# Set workdir
+WORKDIR /opt
+# Define version of python interpreter to use
+COPY ./.python-version ./
+# Pin and install python interpreter
+RUN uv python pin "$(cat .python-version)"
 
-RUN chown -R vscode $RYE_HOME
+# let vscode user to use uv
+RUN chown -R vscode $UV_HOME
