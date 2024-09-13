@@ -22,7 +22,9 @@
                 "exiasr.hadolint",
                 "kevinrose.vsc-python-indent",
                 "ms-azuretools.vscode-docker",
+                "ms-python.mypy-type-checker",
                 "ms-python.python",
+                "ms-python.vscode-pylance",
                 "ms-vscode-remote.remote-containers",
                 "shardulm94.trailing-spaces",
                 "usernamehw.errorlens",
@@ -30,17 +32,30 @@
                 // Project related extensions
             ],
             "settings": {
+                // Editor settings
+                "files.insertFinalNewline": true,
+                "files.trimTrailingWhitespace": true,
+
+                // Python setttings
+                "python.testing.pytestArgs": [
+                    "tests"
+                ],
+                "python.testing.pytestEnabled": true,
+                "python.analysis.typeCheckingMode": "basic",
+                "python.analysis.autoImportCompletions": true,
+                "python.analysis.extraPaths": [
+                    "${containerWorkspaceFolder}/types"
+                ],
                 "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+                "python.venvPath": "${containerWorkspaceFolder}/.venv",
+                //Extensions
                 "[python]": {
                     "editor.codeActionsOnSave": {
-                        "source.fixAll": "explicit",
-                        "source.organizeImports": "explicit"
+                        "source.fixAll.ruff": "explicit",
+                        "source.organizeImports.ruff": "explicit"
                     },
                     "editor.defaultFormatter": "charliermarsh.ruff",
-                    "editor.formatOnSave": true,
-                    "editor.rulers": [
-                        88
-                    ]
+                    "editor.formatOnSave": true
                 },
                 "terminal.integrated.defaultProfile.linux": "zsh",
                 "terminal.integrated.profiles.linux": {
@@ -66,10 +81,10 @@
     },
 
     // Use 'postCreateCommand' to run commands after the container is created.
-    "postCreateCommand": "rye sync -f",
+    "postCreateCommand": "uv sync --dev --all-extras",
 
     // use 'postStartCommand' to run commands after the container is started.
-    "postStartCommand": "which git && rye run pre-commit install",
+    "postStartCommand": "which git && uv run pre-commit install",
 
     // Run vscode-server as non-root user
     "containerUser": "vscode"
