@@ -13,7 +13,7 @@ EOF
 ADD https://astral.sh/uv/install.sh uv-installer.sh
 
 # Run the installer then remove it
-RUN sh uv-installer.sh
+RUN sh uv-installer.sh && rm uv-installer.sh
 
 # Devcontainer image
 FROM mcr.microsoft.com/vscode/devcontainers/base:bookworm

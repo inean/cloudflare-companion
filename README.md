@@ -140,10 +140,10 @@ export DOMAIN__1__NAME="subdomain2.example.ltd"
 # Uses default RC_TYPE and TARGET_DOMAIN
 ```
 
-[!NOTE]
+\[!NOTE\]
 In the example, if `dns-synchub` finds at least one service which exposes a Traefik rule with values set to `Host('subdomain1.example.ltd')` and `Host('subdomain2.example.ltd')`, it will update DNS records with the first one pointing an *A* record to `203.0.113.42` and the second one with a *CNAME* record redirecting to `example.ltd`.
 
-[!IMPORTANT]
+\[!IMPORTANT\]
 The index must start at **`0`**. In this case, the `NAME` environment variable will be ignored, and `TARGET_DOMAIN` will only be required if it is not specified for each domain.
 
 ### Filtering
@@ -214,7 +214,7 @@ To use the leaked socket in the container, you need to run the container with th
 Sensitive information can be securely managed using Docker Secrets. To pass the Cloudflare Scoped Token to `dns-synchub`, follow these steps:
 
 1. Create a Docker Secret named `cf_token` containing your Cloudflare Scoped API token.
-2. Ensure the secret is accessible to the container.
+1. Ensure the secret is accessible to the container.
 
 Docker automatically makes the secret available to the container, allowing `dns-synchub` to securely access the token. By default, `dns-synchub` looks for secrets defined in the `/var/run` directory.
 
@@ -259,7 +259,7 @@ secrets:
 The current implementation supports two types of pollers for fetching services to create DNS records:
 
 1. **Docker Poller**: Retrieves services directly from Docker.
-2. **Traefik Poller**: Fetches services managed by Traefik.
+1. **Traefik Poller**: Fetches services managed by Traefik.
 
 Pollers are responsible for fetching available services and passing them to the sync service.
 
@@ -300,11 +300,11 @@ To enable Traefik Polling mode, set the following environment variables:
 In this mode, `dns-synchub` will poll Traefik every 30 seconds by default. During each poll, it will discover routers and include hosts that match the following criteria:
 
 1. The provider is not Docker.
-2. The status is enabled.
-3. The name is present.
-4. The rule contains `Host(...)`.
-5. The host matches the include patterns (default: `.*`).
-6. The host does not match the exclude patterns (default: none).
+1. The status is enabled.
+1. The name is present.
+1. The rule contains `Host(...)`.
+1. The host matches the include patterns (default: `.*`).
+1. The host does not match the exclude patterns (default: none).
 
 The polling interval can be adjusted by setting the `TRAEFIK_POLL_SECONDS` environment variable to the desired number of seconds (e.g., `TRAEFIK_POLL_SECONDS=120`).
 
@@ -326,12 +326,12 @@ Key configuration options include:
 | Parameter       | Description                          | Type             | Default |
 |-----------------|--------------------------------------|------------------|---------|
 | `TARGET_DOMAIN` | The target domain for DNS records.   | `STR`            | `N/A`   |
-| `DEFAULT_TTL`   | Default Time-To-Live for DNS records.| `INT`            | `1`[^1] |
+| `DEFAULT_TTL`   | Default Time-To-Live for DNS records.| `INT`            | `1`\[^1\] |
 | `PROXIED`       | Whether the DNS record is proxied.   | `BOOL`           | `TRUE`  |
 | `RC_TYPE`       | Type of DNS record (e.g., CNAME).    | `A, AAAA, CNAME` | `CNAME` |
 | `ZONE_ID`       | Domain Zone ID                       | `STR`            | `N/A`   |
 
-[^1]: If `1` is set, the TTL will be configured automatically based on the DNS provider's settings. For example, Cloudflare sets the TTL to 30 seconds for paid accounts and 60 seconds for free accounts.
+\[^1\]: If `1` is set, the TTL will be configured automatically based on the DNS provider's settings. For example, Cloudflare sets the TTL to 30 seconds for paid accounts and 60 seconds for free accounts.
 
 ##### Configuring Domain Options
 
@@ -341,7 +341,7 @@ Environment variables prefixed with `DOMAIN` enable customization of DNS record 
 | ------------------------------------- | -------------------------------------------------------- | ------ | ------- |
 | `DOMAIN__<XXX>__NAME`                 | The domain name for which you wish to update records.    | `STR`  |         |
 | `DOMAIN__<XXX>__COMMENT`              | (Optional) Comment for the DNS record.                   | `STR`  | `NONE`  |
-| `DOMAIN__<XXX>__EXCLUDED_SUB_DOMAINS` | Specify subdomain trees to be ignored in labels[^2].     | `LIST` | `[]`    |
+| `DOMAIN__<XXX>__EXCLUDED_SUB_DOMAINS` | Specify subdomain trees to be ignored in labels\[^2\].     | `LIST` | `[]`    |
 
 The following optional parameters may also be defined to customize domain update behavior, otherwise, default values will be used:
 
@@ -351,7 +351,7 @@ The following optional parameters may also be defined to customize domain update
 - `DOMAIN__<XXX>__TARGET_DOMAIN`
 - `DOMAIN__<XXX>__RC_TYPE`
 
-[^2]: For example, specifying `int` would prevent the creation of a CNAME for `*.int.example.com`.
+\[^2\]: For example, specifying `int` would prevent the creation of a CNAME for `*.int.example.com`.
 
 ##### Host Filtering Configuration
 
@@ -387,16 +387,16 @@ To configure [OpenTelemetry](https://opentelemetry.io/), follow these steps:
 
 1. **Set Environment Variables**:
 
-    Ensure that the necessary environment variables are set for OpenTelemetry to function correctly:
+   Ensure that the necessary environment variables are set for OpenTelemetry to function correctly:
 
-    ```bash
-    export OTEL_EXPORTER_OTLP_ENDPOINT="your-otlp-endpoint"
-    export OTEL_RESOURCE_ATTRIBUTES="service.name=your-service-name"
-    ```
+   ```bash
+   export OTEL_EXPORTER_OTLP_ENDPOINT="your-otlp-endpoint"
+   export OTEL_RESOURCE_ATTRIBUTES="service.name=your-service-name"
+   ```
 
-2. **Enable Telemetry**
+1. **Enable Telemetry**
 
-  Telemetry is disabled by default. To enable it, pass the `--enable-telemetry` argument at the command line.
+Telemetry is disabled by default. To enable it, pass the `--enable-telemetry` argument at the command line.
 
 ## Support
 
