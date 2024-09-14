@@ -3,17 +3,16 @@ name: Container CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   lint-container:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Lint Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
@@ -27,15 +26,14 @@ jobs:
     if: ${{ success() }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract Python Version
-        id: extract-python-version
-        uses: ./.github/actions/extract-python-version
+      - name: Get version
+        id: python
+        run: echo "version=$(cat .python-version)" >> "$GITHUB_OUTPUT"
 
       - name: Build
         uses: docker/build-push-action@v6
@@ -46,7 +44,7 @@ jobs:
           tags: ${{ github.repository }}:latest
           build-args: |
             REPOSITORY=${{ github.repository }}
-            PYTHON_VERSION=${{ steps.extract-python-version.outputs.python-version }}
+            PYTHON_VERSION=${{ steps.python.outputs.version }}
 
       - name: Test Image
         run: |
@@ -56,8 +54,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Lint Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
@@ -71,8 +68,7 @@ jobs:
     if: ${{ success() }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -84,4 +80,3 @@ jobs:
           load: true
           file: ./.devcontainer/Dockerfile
           tags: ${{ github.repository }}:latest
-

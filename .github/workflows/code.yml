@@ -7,79 +7,89 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python with uv
-        uses: ./.github/actions/setup-python-with-uv
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-      - name: Lint
-        run: uv run ruff check --output-format=github .
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: "Install the project"
+        run: uv sync --frozen --all-extras --dev
+
+      - name: "Pre-commit"
+        run: uv run pre-commit run --show-diff-on-failure --color=always --all-files
+        env:
+          SKIP: "update-version,ruff-format,hadolint"
+        shell: bash
 
   format:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python with uv
-        uses: ./.github/actions/setup-python-with-uv
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-      - name: Format
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: "Install the project"
+        run: uv sync --frozen --all-extras --dev
+
+      - name: "Format"
         run: uv run ruff format . --check --diff
 
   tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version:
+          - 3.11
+          - 3.12
+        include:
+          - python-version: "3.13.0-rc.2"
+            continue-on-error: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python ${{ matrix.python-version }} with uv
-        uses: ./.github/actions/setup-python-with-uv
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: "Set up Python ${{ matrix.python-version }}"
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run Pytest if directory exists
-        run:  uv run pytest --cov=src --cov-report=xml  --junitxml=junit.xml
+      - name: "Install the project"
+        run: uv sync --frozen --all-extras --dev
 
-      - name: Upload test results to Codecov
-        if: ${{ !env.ACT  }}
-        uses: codecov/test-results-action@v1
-        with:
-          fail_ci_if_error: true
-          file: junit.xml
-          flags:  ${{ matrix.python-version }}
-          name: ${{ github.repository }}
-          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: "Run tests with coverage"
+        env:
+          COVERAGE_FILE: .coverage.${{ runner.os }}-py${{ matrix.python-version }}-without-deps
+          CONTEXT: ${{ runner.os }}-py${{ matrix.python-version }}-without-deps
+        run: uv run coverage run -m pytest --durations=10
 
-      - name: Upload Coverage files
-        uses: actions/upload-artifact@v3
-        with:
-          name: coverage-xml
-          path: coverage.xml
+      - run: uv run coverage combine
+      - run: uv run coverage xml
 
-  coverage:
-    runs-on: ubuntu-latest
-    needs: tests
-    if: ${{ always() && ! cancelled() }}
-
-    steps:
-      - name: Download coverage.xml
-        uses: actions/download-artifact@v3
-        with:
-          name: coverage-xml
-          path: .
-
-      - name: Upload Coverage to Codecov
+      - name: "Upload coverage to CodeCov"
         uses: codecov/codecov-action@v4
         if: ${{ !env.ACT }}
         with:
-          fail_ci_if_error: true
           file: coverage.xml
-          flags: unittests
-          name: ${{ github.repository }}
-          token: ${{ secrets.CODECOV_TOKEN }}
-
+          env_vars: PYTHON,OS

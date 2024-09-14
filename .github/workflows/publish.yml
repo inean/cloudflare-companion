@@ -38,8 +38,7 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout the repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up QEMU to build multi-platform images
         uses: docker/setup-qemu-action@v3
@@ -54,13 +53,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute Environment
-        id: extract_version
+      - name: Compute Environment Variables
         run: |
-          VERSION=$(grep -Po '(?<=^__version__ = ")[^"]*' src/dns_synchub/__about__.py)
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          PYTHON_VERSION=$(cat .python-version)
-          echo "PYTHON_VERSION=$PYTHON_VERSION" >> "$GITHUB_ENV"
+          echo "VERSION=$(grep -Po '(?<=^__version__ = ")[^"]*' src/dns_synchub/__about__.py)" >> "$GITHUB_ENV"
+          echo "PYTHON_VERSION=$(cat .python-version)" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Extract metadata (tags, labels) for Docker

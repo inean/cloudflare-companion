@@ -23,12 +23,6 @@ dependencies = [
 requires-python = ">= 3.11"
 
 [project.optional-dependencies]
-telemetry = [
-    "opentelemetry-api",
-    "opentelemetry-sdk",
-    "opentelemetry-exporter-otlp-proto-grpc",
-    "opentelemetry-exporter-prometheus",
-]
 
 [project.urls]
 Homepage = "https://github.com/inean/dns-synchub"
@@ -157,35 +151,19 @@ keep-runtime-typing = true
 root = 'src/dns_synchub'
 
 [tool.mypy]
-mypy_path = "types"
+strict = true
 files = [
     "src/",
     "tests/",
 ]
-check_untyped_defs = true
-disallow_any_generics = true
-disallow_incomplete_defs = true
-disallow_subclassing_any = true
-disallow_untyped_calls = true
-disallow_untyped_decorators = true
+# Third party type stubs
+mypy_path = "types"
+#Don't prevents discovery of packages that don’t have an __init__.py
 namespace_packages = true
-no_implicit_reexport = true
-python_version = '3.11'
-show_error_codes = true
-strict_optional = true
-warn_redundant_casts = true
-warn_unused_configs = true
-warn_unused_ignores = true
-
-# for strict mypy: (this is the tricky one :-))
-disallow_untyped_defs = true
-
-# remaining arguments from `mypy --strict` which cause errors
-# no_implicit_optional = true
-# warn_return_any = true
 
 [[tool.mypy.overrides]]
 module = [
     'dotenv.*',
 ]
+#Silently ignore imports of missing modules
 ignore_missing_imports = true

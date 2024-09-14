@@ -4,7 +4,7 @@ ARG APP_PATH=/app
 ARG VIRTUAL_ENV_PATH=.venv
 
 # Builder stage
-FROM python:${PYTHON_VERSION}-slim AS builder
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 # Re-declare the ARG to use it in this stage
 ARG APP_PATH
@@ -16,18 +16,26 @@ RUN <<EOF
     apt-get install --no-install-recommends -y git
 EOF
 
-# hadolint ignore=DL3013
-RUN pip install --no-cache-dir uv
-
 # Set the working directory:
 WORKDIR ${APP_PATH}
 
-# Copy and install dependencies using uv:
-COPY uv.lock .
-RUN uv sync --locked --link-mode copy --no-cache --compile-bytecode --no-dev --all-extras
+# Change ownership of the application directory to the non-root user
+RUN chown -R nobody ${APP_PATH}
 
-# Set a Virtual env
-ENV PATH="${APP_PATH}/${VIRTUAL_ENV_PATH}/bin:$PATH"
+# Set uv environment variables
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+
+# Install the application dependencies and build .venv:
+# for rootless configurations like podman, add 'z' or relabel=shared
+# to circumvent the SELinux context
+#
+# See https://github.com/hadolint/language-docker/issues/95 for hadolint support
+RUN --mount=type=cache,target=/root/.cache/uv                         \
+    --mount=type=bind,source=uv.lock,target=uv.lock,ro                \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml,ro  \
+    uv sync --frozen --no-install-project --no-dev
 
 # Copy the application source code:
 COPY src .
@@ -51,7 +59,7 @@ LABEL maintainer="Carlos Martín (github.com/inean)"
 # Set the working directory:
 WORKDIR ${APP_PATH}
 
-# Ensure venv is used
+# Place executables in the environment at the front of the path
 ENV PATH="${APP_PATH}/${VIRTUAL_ENV_PATH}/bin:$PATH"
 
 # Copy dependencies and source code from the builder stage

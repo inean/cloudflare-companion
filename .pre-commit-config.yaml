@@ -2,7 +2,7 @@
 default_stages: [commit]
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.4
+    rev: v0.6.5
     hooks:
       - id: ruff
         name: Ruff linter
@@ -11,8 +11,9 @@ repos:
       - id: ruff-format
         name: Ruff format
         types_or: [python, pyi]
+
   - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.13
+    rev: 0.7.17
     hooks:
       - id: mdformat
         additional_dependencies:
@@ -32,26 +33,28 @@ repos:
     hooks:
       - id: update-version
         name: Update Version
-        entry: scripts/versioning.py
+        entry: uv run scripts/versioning.py
         language: python
         pass_filenames: false
         stages: [commit]
         files: ^pyproject\.toml$
 
       - id: mypy
-        name: mypy
+        name: mypy static type checker
         language: system
         types: [python]
-        entry: uv run mypy --strict
+        entry: uv run mypy
+        pass_filenames: false
 
       - id: pyupgrade
         name: Pyupgrade
-        entry: pyupgrade --py311-plus
+        entry: uv run pyupgrade --py311-plus
         types: [python]
         language: system
 
       - id: deptry
         name: Deptry
-        entry: deptry src tests
+        entry: uv run deptry src tests
+        types: [python]
         language: system
         pass_filenames: false
