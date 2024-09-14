@@ -52,7 +52,7 @@ def initialize_logger(settings: Settings) -> logging.Logger:
     }
     if any(telemetry_options.values()):
         try:
-            from dns_synchub.telemetry import telemetry_log_handler  # type: ignore
+            from dns_synchub.telemetry import telemetry_log_handler
 
             handler = telemetry_log_handler(settings.service_name, **telemetry_options)
             logger.addHandler(handler)
