@@ -46,9 +46,9 @@ def report_state(settings: settings.Settings) -> Logger:
 def main() -> int:
     try:
         # Load environment variables from the specified env file
-        cli.parse_args()
+        args = cli.parse_args()
         # Load settings
-        options = settings.Settings()
+        options = settings.Settings(dry_run=args.dry_run)
         # Check for uppercase docker secrets or env variables
         assert options.cf_token
         assert options.target_domain

@@ -9,7 +9,16 @@ import docker
 from docker import DockerClient
 from docker.errors import NotFound
 from docker.models.containers import Container
-from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
+import requests
+import tenacity
+from tenacity import (
+    AsyncRetrying,
+    RetryError,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from typing_extensions import override
 
 from dns_synchub.pollers import Poller, PollerData
@@ -138,16 +147,28 @@ class DockerPoller(Poller[DockerClient]):
     @override
     async def _watch(self) -> None:
         until = datetime.now().strftime('%s')
+
+        @retry(
+            wait=wait_exponential(multiplier=self.config['wait'], max=self.poll_sec),
+            retry=retry_if_exception_type(requests.exceptions.ConnectionError),
+            before_sleep=lambda state: self.logger.error(
+                f'Retry attept {state.attempt_number}: {state.outcome.exception() if state.outcome else None}'
+            ),
+        )
+        async def fetch_events(kwargs: dict[str, Any]) -> Any:
+            kwargs['until'] = datetime.now().strftime('%s')
+            return await asyncio.to_thread(self.client.events, **kwargs)
+
         while True:
             since = until
             self.logger.debug('Fetching routers from Docker API')
-            until = datetime.now().strftime('%s')
             # Ther's no swarm in podman engine, so remove Action filter
             filter = {'Type': 'service', 'status': 'start'}
-            kwargs = {'since': since, 'until': until, 'filters': filter, 'decode': True}
+            kwargs = {'since': since, 'filters': filter, 'decode': True}
             events = None
             try:
-                events = await asyncio.to_thread(self.client.events, **kwargs)
+                events = await fetch_events(kwargs)
+                until = str(kwargs['until'])
                 for event in events:
                     if 'id' not in event:
                         self.logger.warning('Container ID is None. Skipping container.')
@@ -155,9 +176,14 @@ class DockerPoller(Poller[DockerClient]):
                     raw_data = await asyncio.to_thread(self.client.containers.get, event['id'])
                     services = [DockerContainer(raw_data, logger=self.logger)]
                     self.events.set_data(self._validate(services))
+                else:
+                    raise NotFound('No events found')
             except NotFound:
                 await self.events.emit()
                 await asyncio.sleep(self.poll_sec)
+            except tenacity.RetryError as err:
+                self.logger.error(f'Could not fetch events: {err.last_attempt.result()}')
+                raise asyncio.CancelledError from err
             except asyncio.CancelledError:
                 self.logger.info('Docker polling cancelled. Performing cleanup.')
                 raise

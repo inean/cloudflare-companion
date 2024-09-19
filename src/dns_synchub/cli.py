@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from dataclasses import MISSING, dataclass, field, fields
 from logging import Logger
 from typing import Any
 
@@ -13,14 +14,35 @@ from dns_synchub.pollers.traefik import TraefikPoller
 from dns_synchub.settings import Settings
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Cloudflare Companion')
-    parser.add_argument('--env-file', type=str, help='Path to the .env file')
-    parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}')
+@dataclass
+class Args:
+    version: str = field(
+        metadata={
+            'help': 'Show program version',
+            'action': 'version',
+            'version': f'%(prog)s {VERSION}',
+        }
+    )
+    env_file: str = field(metadata={'help': 'Path to the .env file', 'type': str})
+    dry_run: bool = field(default=False, metadata={'help': 'Dry run mode', 'action': 'store_true'})
+
+
+def parse_args() -> Args:
+    parser = argparse.ArgumentParser(description='DNS SyncHub')
+
+    # Iterate over the fields of the Args dataclass to populate the parser
+    for field_info in fields(Args):
+        name = field_info.name
+        metadata = field_info.metadata
+        default = field_info.default if field_info.default is not MISSING else None
+        # Add the argument to the parser
+        parser.add_argument(f'--{name.replace("_", "-")}', default=default, **metadata)
 
     args = parser.parse_args()
     dotenv.load_dotenv(args.env_file)
-    return args
+
+    # Return an instance of the custom TypedDict
+    return Args(**vars(args))
 
 
 async def main(log: Logger, *, settings: Settings) -> None:
