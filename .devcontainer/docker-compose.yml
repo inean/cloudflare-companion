@@ -1,13 +1,26 @@
 ---
 name: "dns-synchub"
+
+x-logging: &logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  default:
+    name: "dns-synchub"
+    driver: "bridge"
+
 services:
-  devcontainer:
+  app:
+    container_name: "app"
     build:
       context: ..
-      dockerfile: .devcontainer/Dockerfile
+      dockerfile: ".devcontainer/Dockerfile"
     environment:
       - PYTHONUNBUFFERED=1
-      - OTEL_EXPORTER_OTLP_ENDPOINT=telemetry:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otelcol:4317
     volumes:
       - "..:/workspace:cached"
     cap_add:
@@ -18,23 +31,45 @@ services:
       - label=disable
       - apparmor=unconfined
     depends_on:
-      - telemetry
+      - otelcol
       - traefik
-      - whoami
     # Override the default command so things don't shut down after the process ends.
     command: "sleep infinity"
 
+  ##
+  # Proxy Services
+  ##
   traefik:
     image: "traefik:v3.1"
     container_name: "traefik"
     command:
-      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      # Providers
       - "--providers.docker=true"
-      - "--entrypoints.web.address=:3000"
       - "--providers.docker.exposedbydefault=false"
+      # Entrypoints
+      - "--entrypoints.web.address=:8080"
+      - "--entrypoints.otlp-grpc.address=:4317"
+      # Enable metrics
+      - "--metrics.otlp.grpc=true"
+      - "--metrics.otlp.grpc.endpoint=otelcol:4317"
+      - "--metrics.otlp.grpc.insecure=true"
+      # Enable tracing
+      - "--tracing.otlp.grpc=true"
+      - "--tracing.otlp.grpc.endpoint=otelcol:4317"
+      - "--tracing.otlp.grpc.insecure=true"
+      # Enable access logs
+      - "--accesslog=true"
+      - "--accesslog.filepath=/logs/traefik/access.log"
+      - "--accesslog.filters.statusCodes=400-599"
+      - "--accesslog.format=json"
+    deploy:
+      resources:
+        limits:
+          memory: 400M
     ports:
       - "8080:8080"
-      - "3000:3000"
+      - "4317:4317"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     cap_add:
@@ -43,29 +78,189 @@ services:
       - "seccomp=unconfined"
       - "label=disable"
       - "apparmor=unconfined"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=(PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
+      - "traefik.http.routers.traefik.service=api@internal"
+    logging: *logging
 
-  telemetry:
-    image: otel/opentelemetry-collector:latest
-    container_name: telemetry
-    volumes:
-      - ./opentelemetry.yml:/etc/otelcol/config.yaml:ro
+  ##
+  # Application Services
+  ##
+  flagd:
+    image: "ghcr.io/open-feature/flagd:latest"
+    container_name: flagd
+    deploy:
+      resources:
+        limits:
+          memory: 50M
+    environment:
+      - FLAGD_OTEL_COLLECTOR_URI=otelcol:4317
+      - FLAGD_METRICS_EXPORTER=otel
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=dns-synchub-dev
+      - OTEL_SERVICE_NAME=flagd
+    command: [ "start", "--uri", "file:./etc/flagd/flagd.json" ]
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "8888:8888"   # Prometheus metrics exposed by the collector
-      - "8889:8889"   # Prometheus exporter metrics
+      - 8013
+    volumes:
+      - ./flagd:/etc/flagd
+    logging: *logging
+
+  ##
+  # Observability Services
+  ##
+  otelcol:
+    image: "otel/opentelemetry-collector-contrib:latest"
+    container_name: "otel-col"
+    deploy:
+      resources:
+        limits:
+          memory: 200M
+    restart: unless-stopped
+    command: [ "--config=/etc/opentelemetry.yml" ]
+    user: 0:0
+    cap_add:
+      - "SYS_ADMIN"
+    security_opt:
+      - "seccomp=unconfined"
+      - "label=disable"
+      - "apparmor=unconfined"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.otelcol.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.otelcol.entrypoints=otlp-grpc"
+      - "traefik.tcp.services.otelcol.loadbalancer.server.port=4317"
+    volumes:
+      - "./otelcol/opentelemetry.yml:/etc/opentelemetry.yml:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      # Volumes needed for otel scrappers
+      - "/:/hostfs:ro"
+      - "/var/log/journal:/var/log/journal:ro"
+      - "service-logs:/logs"
+    ports:
+      - "4317" # OTLP gRPC receiver
+      - "8006" # Fluentd receiver
+    depends_on:
+      - jaeger
+      - opensearch
+    logging: *logging
 
   prometheus:
-    image: prom/prometheus:latest
-    restart: always
+    image: "prom/prometheus:latest"
+    container_name: "prometheus"
+    command:
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --storage.tsdb.retention.time=1h
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+      - --web.external-url=/prometheus/
+      - --enable-feature=exemplar-storage
+      - --enable-feature=otlp-write-receiver
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)"
+      - "traefik.http.routers.prometheus.entrypoints=web"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 300M
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "9090" # Prometheus UI
+    logging: *logging
+
+  jaeger:
+    image: "jaegertracing/all-in-one:latest"
+    container_name: "jaeger"
+    command:
+      - "--memory.max-traces=5000"
+      - "--query.base-path=/jaeger"
+      - "--prometheus.server-url=http://prometheus:9090/prometheus"
+      - "--prometheus.query.normalize-calls=true"
+      - "--prometheus.query.normalize-duration=true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jaeger.rule=PathPrefix(`/jaeger`)"
+      - "traefik.http.routers.jaeger.entrypoints=web"
+      - "traefik.http.services.jaeger.loadbalancer.server.port=16686"
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+    ports:
+      - "16686" # Jaeger UI
+      - "4317" # Jaeger gRPC
+    environment:
+      - METRICS_STORAGE_TYPE=prometheus
+    logging: *logging
+
+  # OpenSearch
+  opensearch:
+    image: "opensearchproject/opensearch:latest"
+    container_name: opensearch
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: unless-stopped
+    environment:
+      - cluster.name=dev-cluster
+      - node.name=dev-node
+      - bootstrap.memory_lock=true
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms300m -Xmx300m
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200"
+    logging: *logging
+
+  grafana:
+    image: "grafana/grafana:latest"
+    container_name: grafana
+    deploy:
+      resources:
+        limits:
+          memory: 100M
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    restart: unless-stopped
+    environment:
+      - "GF_INSTALL_PLUGINS=grafana-opensearch-datasource"
+    volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+    ports:
+      - "3000"
+    logging: *logging
 
   whoami:
     image: "containous/whoami"
     container_name: "whoami"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
+      - "traefik.http.routers.whoami.rule=(Host(`whoami.localhost`) || PathPrefix(`/whoami`))"
       - "traefik.http.routers.whoami.entrypoints=web"
+      - "traefik.http.routers.whoami.middlewares=whoami-regex"
+      - "traefik.http.middlewares.whoami-regex.replacepathregex.regex=^/whoami(/ui)?/?$$"
+      - "traefik.http.middlewares.whoami-regex.replacepathregex.replacement=/whoami/ui/"
+      - "traefik.http.services.whoami.loadbalancer.server.port=80"
+    logging: *logging
+
+volumes:
+  service-logs:

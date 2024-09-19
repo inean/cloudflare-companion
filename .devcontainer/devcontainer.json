@@ -6,7 +6,7 @@
 
     // Docker Compose Options
     "dockerComposeFile": "docker-compose.yml",
-    "service": "devcontainer",
+    "service": "app",
 
     "features": {
         "ghcr.io/dhoeric/features/hadolint:1": { },
@@ -68,31 +68,21 @@
     },
 
     // Forward traefik dashboard port
-    "forwardPorts": [ 3000, 8080 ],
+    "forwardPorts": [ 8080 ],
+
     "portsAttributes": {
-        "3000": {
-            "label": "Traefik Proxy",
-            "onAutoForward": "notify"
-        },
+
         "8080": {
-            "label": "Traefik Dashboard",
-            "onAutoForward": "notify"
-        },
-        "4317": {
-            "label": "Telemetry",
-            "onAutoForward": "notify"
-        },
-        "9090": {
-            "label": "Prometheus",
+            "label": "Traefik Proxy",
             "onAutoForward": "notify"
         }
     },
 
-    // Use 'postCreateCommand' to run commands after the container is created.
-    "postCreateCommand": "uv sync --dev --all-extras",
+    // Update container
+    "updateContentCommand": "uv sync --dev --all-extras",
 
-    // use 'postStartCommand' to run commands after the container is started.
-    "postStartCommand": "which git && uv run pre-commit install",
+    // Use 'postCreateCommand' to run commands after the container is created.
+    "postCreateCommand": "uv run pre-commit install",
 
     // Run vscode-server as non-root user
     "containerUser": "vscode"

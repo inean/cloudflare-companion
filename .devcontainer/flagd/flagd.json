@@ -1,0 +1,24 @@
+{
+  "$schema": "https://flagd.dev/schema/v0/flags.json",
+  "flags": {
+    "DockerUnreachable": {
+      "description": "Simulate Docker being down or unreachable",
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "DockerSlow": {
+      "description": "Simulate slow Docker response times",
+      "state": "ENABLED",
+      "variants": {
+        "10sec": 10000,
+        "5sec": 5000,
+        "off": 0
+      },
+      "defaultVariant": "off"
+    }
+  }
+}

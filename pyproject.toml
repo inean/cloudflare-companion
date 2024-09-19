@@ -7,7 +7,6 @@ records upon container start when using Traefik as a Reverse Proxy
 authors = [
     { name = "Carlos Martín", email = "inean.es@gmail.com" },
 ]
-license = "MIT"
 readme = "README.md"
 version = "0.1.0"
 dependencies = [
@@ -34,8 +33,6 @@ Homepage = "https://github.com/inean/dns-synchub"
 Source = "https://github.com/inean/dns-synchub"
 Changelog = "https://github.com/inean/dns-synchub/blob/main/CHANGELOG.md"
 
-[project.scripts]
-dns-synchub = "dns_synchub:main"
 
 [tool.uv]
 dev-dependencies = [
@@ -54,6 +51,7 @@ dev-dependencies = [
     # Type stubs
     "types-docker>=7.1.0.20240827",
 ]
+package = false
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"

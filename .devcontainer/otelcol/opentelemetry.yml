@@ -1,0 +1,125 @@
+---
+receivers:
+  # OpenTelemetry Collector receiver that can receive traces metrics and logs
+  otlp:
+    protocols:
+      grpc:
+        endpoint: otelcol:4317
+
+  # Host metrics
+  hostmetrics:
+    root_path: /hostfs
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      disk:
+      load:
+      filesystem:
+        exclude_mount_points:
+          mount_points:
+            - /dev/*
+            - /proc/*
+            - /sys/*
+            - /run/k3s/containerd/*
+            - /var/lib/docker/*
+            - /var/lib/kubelet/*
+            - /snap/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - binfmt_misc
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - iso9660
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - procfs
+            - pstore
+            - rpc_pipefs
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tracefs
+          match_type: strict
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      network:
+      paging:
+      processes:
+      process:
+        mute_process_exe_error: true
+        mute_process_io_error: true
+        mute_process_user_error: true
+
+  # Collect own metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "otelcol"
+          scrape_interval: 10s
+          static_configs:
+            - targets: ["0.0.0.0:8888"]
+
+  # Traefik access logs
+  filelog/traefik:
+    include: [/logs/traefik/access.log]
+    start_at: beginning
+    operators:
+      - type: json_parser
+
+exporters:
+  debug:
+  # Export traces
+  otlp:
+    endpoint: "jaeger:4317"
+    tls:
+      insecure: true
+  # Export metrics
+  otlphttp:
+    endpoint: "http://prometheus:9090/prometheus/api/v1/otlp"
+    tls:
+      insecure: true
+  # Export logs
+  opensearch:
+    logs_index: otel
+    http:
+      endpoint: "http://opensearch:9200"
+      tls:
+        insecure: true
+
+processors:
+  batch:
+  transform:
+    error_mode: ignore
+
+connectors:
+  spanmetrics:
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [transform, batch]
+      exporters: [debug, otlp, spanmetrics]
+    metrics:
+      receivers: [hostmetrics, otlp, prometheus, spanmetrics]
+      processors: [batch]
+      exporters: [otlphttp, debug]
+    logs:
+      receivers: [otlp, filelog/traefik]
+      processors: [batch]
+      exporters: [opensearch, debug]
