@@ -59,7 +59,7 @@ def validate_ttl(value: int | Literal['auto']) -> int | Literal['auto']:
 TTLType = Annotated[int | str, BeforeValidator(validate_ttl)]
 
 
-class DomainsModel(BaseModel):
+class Domains(BaseModel):
     name: str
     zone_id: str
     proxied: bool = True

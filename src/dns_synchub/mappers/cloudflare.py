@@ -22,7 +22,7 @@ from typing_extensions import override
 from dns_synchub.mappers import Mapper
 from dns_synchub.pollers import PollerData
 from dns_synchub.settings import Settings
-from dns_synchub.types import DomainsModel, Event, PollerSourceType
+from dns_synchub.types import Domains, Event, PollerSourceType
 
 
 class CloudFlareException(Exception):
@@ -124,8 +124,8 @@ class CloudFlareMapper(Mapper[PollerData[PollerSourceType], CloudFlare]):
 
     # Start Program to update the Cloudflare
     @override
-    async def sync(self, data: PollerData[PollerSourceType]) -> list[DomainsModel] | None:  # noqa: C901
-        def is_domain_excluded(host: str, domain: DomainsModel) -> bool:
+    async def sync(self, data: PollerData[PollerSourceType]) -> list[Domains] | None:  # noqa: C901
+        def is_domain_excluded(host: str, domain: Domains) -> bool:
             for sub_dom in domain.excluded_sub_domains:
                 if f'{sub_dom}.{domain.name}' in host:
                     self.logger.info(f'Ignoring {host}: Match excluded sub domain: {sub_dom}')
@@ -179,7 +179,7 @@ class CloudFlareMapper(Mapper[PollerData[PollerSourceType], CloudFlare]):
         if not tasks:
             return None
 
-        results: list[DomainsModel] = []
+        results: list[Domains] = []
         # run tasks concurrently
         done, pending = await asyncio.wait(tasks, timeout=self.tout_sec)
         # Cancel pending tasks
@@ -191,6 +191,6 @@ class CloudFlareMapper(Mapper[PollerData[PollerSourceType], CloudFlare]):
                     self.logger.error(f"Sync failed for '{data.source}': [{int(err)}]")
                 self.logger.error(f'{str(err)}')
                 continue
-            results.append(DomainsModel(**task.result()))
+            results.append(Domains(**task.result()))
         # Return results
         return results or None

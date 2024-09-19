@@ -6,7 +6,7 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dns_synchub.types import (
-    DomainsModel,
+    Domains,
     LogHandlersType,
     LogLevelType,
     RecordType,
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     dry_run: bool = False
     verbose: bool = False
 
-    # Telemetry Settings
+    # Log Settings
     service_name: str = 'dns-synchub'
     log_level: LogLevelType = logging.INFO
     log_handlers: set[LogHandlersType] = {'otlp', 'stderr'}
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     cf_sync_seconds: int = 300  # Sync interval in seconds
     cf_timeout_seconds: int = 30  # Timeout for blocking requests operations
 
-    domains: list[DomainsModel] = []
+    domains: list[Domains] = []
 
     @model_validator(mode='after')
     def update_domains(self) -> Self:

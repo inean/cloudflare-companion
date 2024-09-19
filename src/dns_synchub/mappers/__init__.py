@@ -3,7 +3,7 @@ from logging import Logger
 from typing import Generic, Protocol, TypedDict, TypeVar, runtime_checkable
 
 from dns_synchub.settings import Settings
-from dns_synchub.types import DomainsModel, EventSubscriber
+from dns_synchub.types import Domains, EventSubscriber
 
 T = TypeVar('T')  # Client backemd
 E = TypeVar('E')  # Event type accepted
@@ -35,7 +35,7 @@ class BaseMapper(ABC, MapperProtocol[E, R], Generic[E, R]):
         self.logger = logger
 
 
-class Mapper(BaseMapper[E, DomainsModel], Generic[E, T]):
+class Mapper(BaseMapper[E, Domains], Generic[E, T]):
     def __init__(self, logger: Logger, *, settings: Settings, client: T | None = None):
         # init client
         self._client: T | None = client

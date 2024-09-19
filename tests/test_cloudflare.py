@@ -10,14 +10,14 @@ import pytest
 from dns_synchub.mappers.cloudflare import CloudFlareMapper
 from dns_synchub.pollers import PollerData
 from dns_synchub.settings import Settings
-from dns_synchub.types import DomainsModel, Event, PollerSourceType
+from dns_synchub.types import Domains, Event, PollerSourceType
 
 
 @pytest.fixture
 def settings() -> Settings:
-    records: list[DomainsModel] = []
+    records: list[Domains] = []
     for i in range(1, 5):
-        entry = DomainsModel(
+        entry = Domains(
             zone_id=f'{i}',
             name=f'region{i}.example.ltd',
             target_domain=f'target{i}.example.ltd',
@@ -270,7 +270,7 @@ async def test_sync_with_record_update(
 
     with patch.object(mapper, 'dry_run', False):
         result = await mapper.sync(PollerData[PollerSourceType]([host], 'manual'))
-        assert result and isinstance(result.pop(), DomainsModel)
+        assert result and isinstance(result.pop(), Domains)
         mock_cf_client.zones.dns_records.put.assert_called_once()
 
 

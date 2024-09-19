@@ -1,8 +1,50 @@
 from functools import lru_cache
 import logging
+import os
 import sys
+from sys import stderr
 
 from dns_synchub.settings import Settings
+from dns_synchub.types import LogHandlersType
+
+try:
+    from opentelemetry._logs import set_logger_provider
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
+    from opentelemetry.sdk.resources import Resource
+
+    OPENTELEMETRY_AVAILABLE = True
+except ImportError:
+    OPENTELEMETRY_AVAILABLE = False
+
+
+def telemetry_logger(service_name: str, *, exporters: set[LogHandlersType]) -> logging.Handler:
+    if not OPENTELEMETRY_AVAILABLE:
+        return logging.NullHandler()
+
+    # Set up a logging provider
+    logger_provider = LoggerProvider(
+        resource=Resource.create({
+            'service.name': service_name,
+        })
+    )
+    set_logger_provider(logger_provider)
+
+    # Configure ConsoleLogExporter
+    if 'otlp_console' in exporters:
+        term_exporter = ConsoleLogExporter(out=stderr)
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(term_exporter))
+
+    # Configure OTLPLogExporter
+    if 'otlp' in exporters:
+        if 'OTEL_EXPORTER_OTLP_ENDPOINT' not in os.environ:
+            raise ValueError('OTEL_EXPORTER_OTLP_ENDPOINT environment variable not set')
+        otlp_exporter = OTLPLogExporter(insecure=True)
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_exporter))
+
+    # Set up a logging handler for standard Python logging
+    return LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
 
 
 @lru_cache
@@ -46,18 +88,9 @@ def initialize_logger(settings: Settings) -> logging.Logger:
         logger.addHandler(handler)
 
     # Set up telemetry
-    telemetry_options = {
-        'use_otlp_console_handler': 'otlp_console' in settings.log_handlers,
-        'use_otlp_handler': 'otlp' in settings.log_handlers,
-    }
-    if any(telemetry_options.values()):
-        try:
-            from dns_synchub.telemetry import telemetry_log_handler
-
-            handler = telemetry_log_handler(settings.service_name, **telemetry_options)
-            logger.addHandler(handler)
-        except ImportError:
-            logger.warning('Telemetry module not found. Logging to console only.')
+    if OPENTELEMETRY_AVAILABLE:
+        handler = telemetry_logger(settings.service_name, exporters=settings.log_handlers)
+        logger.addHandler(handler)
 
     return logger
 
