@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from dataclasses import MISSING, dataclass, field, fields
 from logging import Logger
 from typing import Any
@@ -39,7 +40,12 @@ def parse_args() -> Args:
         parser.add_argument(f'--{name.replace("_", "-")}', default=default, **metadata)
 
     args = parser.parse_args()
-    dotenv.load_dotenv(args.env_file)
+
+    # Load environment variables from the specified env file,
+    # but only if not present in the current environment
+    for key, value in dotenv.dotenv_values(args.env_file).items():
+        if key not in os.environ:
+            os.environ[key] = value if value else ''
 
     # Return an instance of the custom TypedDict
     return Args(**vars(args))

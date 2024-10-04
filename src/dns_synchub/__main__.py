@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
-from logging import Logger
+import logging
 import pathlib
 import re
 import sys
@@ -13,8 +13,8 @@ import dns_synchub.logger as logger
 import dns_synchub.settings as settings
 
 
-def report_state(settings: settings.Settings) -> Logger:
-    log = logger.initialize_logger(settings=settings)
+def report_state(settings: settings.Settings) -> logging.Logger:
+    log = logger.set_default_logger(logging.getLogger(), settings=settings)
 
     settings.dry_run and log.info(f'Dry Run: {settings.dry_run}')  # type: ignore
     log.debug(f'Default TTL: {settings.default_ttl}')

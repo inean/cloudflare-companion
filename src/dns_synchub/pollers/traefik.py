@@ -1,6 +1,6 @@
 import asyncio
-from logging import Logger
 import re
+from logging import Logger
 from typing import Any
 
 from requests import Response, Session

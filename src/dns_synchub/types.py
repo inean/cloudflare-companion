@@ -1,8 +1,8 @@
-from abc import abstractmethod
 import asyncio
+import logging
+from abc import abstractmethod
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
-import logging
 from typing import (
     Annotated,
     Generic,
@@ -14,10 +14,6 @@ from typing import (
 )
 
 from pydantic import BaseModel, BeforeValidator
-
-# Settings Types
-
-LogHandlersType = Literal['otlp_console', 'otlp', 'stderr', 'file']
 
 
 def validate_log_level(value: str | int) -> int:
@@ -39,7 +35,14 @@ def validate_log_level(value: str | int) -> int:
         return value
 
 
+class LogHandlerType:
+    NONE = 'none'
+    STDOUT = 'stdout'
+    FILE = 'file'
+
+
 LogLevelType = Annotated[int, BeforeValidator(validate_log_level)]
+
 
 # Poller Types
 PollerSourceType = Literal['manual', 'docker', 'traefik']
@@ -68,6 +71,9 @@ class Domains(BaseModel):
     comment: str | None = None
     rc_type: RecordType | None = None
     excluded_sub_domains: list[str] = []
+
+    def match(self, host: str) -> bool:
+        return any(f'{sub_dom}.{self.name}' in host for sub_dom in self.excluded_sub_domains)
 
 
 # Event Types

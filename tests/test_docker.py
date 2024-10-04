@@ -1,7 +1,7 @@
 import asyncio
+import re
 from collections.abc import Callable, Generator
 from logging import Logger
-import re
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from urllib.parse import urlparse

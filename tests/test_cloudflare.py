@@ -3,9 +3,9 @@ from logging import Logger
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
+import pytest
 from CloudFlare import CloudFlare
 from CloudFlare.exceptions import CloudFlareAPIError
-import pytest
 
 from dns_synchub.mappers.cloudflare import CloudFlareMapper
 from dns_synchub.pollers import PollerData
@@ -220,7 +220,7 @@ async def test_sync_with_excluded_domain(
 
     result = await mapper.sync(PollerData[PollerSourceType]([host], 'manual'))
     assert result is None
-    mock_logger.info.assert_called_with(f'Ignoring {host}: Match excluded sub domain: excluded')
+    mock_logger.debug.assert_any_call(f'Ignoring {host}: Match excluded sub domain')
 
 
 @pytest.mark.asyncio

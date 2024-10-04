@@ -1,27 +1,36 @@
-from functools import lru_cache
+import importlib
 import logging
 import os
 import sys
-from sys import stderr
+from functools import partial
+from typing import Protocol, cast
 
 from dns_synchub.settings import Settings
-from dns_synchub.types import LogHandlersType
-
-try:
-    from opentelemetry._logs import set_logger_provider
-    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
-    from opentelemetry.sdk.resources import Resource
-
-    OPENTELEMETRY_AVAILABLE = True
-except ImportError:
-    OPENTELEMETRY_AVAILABLE = False
+from dns_synchub.telemetry import (
+    TelementryExporters as Exporters,
+    TelemetryEnv as Envs,
+    TelemetryEnvDefaults as Constants,
+)
+from dns_synchub.types import LogHandlerType
+from dns_synchub.utils._once import Once
 
 
-def telemetry_logger(service_name: str, *, exporters: set[LogHandlersType]) -> logging.Handler:
-    if not OPENTELEMETRY_AVAILABLE:
+def _telemetry_logger(service_name: str, *, exporters: set[str] | None = None) -> logging.Handler:
+    try:
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
+        from opentelemetry.sdk.resources import Resource
+    except ImportError:
         return logging.NullHandler()
+
+    if exporters is None:
+        exporters = set(
+            os.environ.get(
+                Envs.OTEL_LOGGER_EXPORTER,
+                Constants.OTEL_LOGGER_EXPORTER,
+            ).split(',')
+        )
 
     # Set up a logging provider
     logger_provider = LoggerProvider(
@@ -29,47 +38,55 @@ def telemetry_logger(service_name: str, *, exporters: set[LogHandlersType]) -> l
             'service.name': service_name,
         })
     )
-    set_logger_provider(logger_provider)
 
     # Configure ConsoleLogExporter
-    if 'otlp_console' in exporters:
-        term_exporter = ConsoleLogExporter(out=stderr)
+    if Exporters.CONSOLE in exporters:
+        term_exporter = ConsoleLogExporter(out=sys.stderr)
         logger_provider.add_log_record_processor(BatchLogRecordProcessor(term_exporter))
 
     # Configure OTLPLogExporter
-    if 'otlp' in exporters:
-        if 'OTEL_EXPORTER_OTLP_ENDPOINT' not in os.environ:
-            raise ValueError('OTEL_EXPORTER_OTLP_ENDPOINT environment variable not set')
-        otlp_exporter = OTLPLogExporter(insecure=True)
-        logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_exporter))
+    if Exporters.OTLP in exporters:
+        otlp_modname = 'opentelemetry.exporter.otlp.proto.grpc._log_exporter'
+        if Envs.OTEL_EXPORTER_OTLP_ENDPOINT not in os.environ:
+            raise ValueError(f'{Envs.OTEL_EXPORTER_OTLP_ENDPOINT} environment variable not set')
+        try:
+            otlp_exporter = importlib.import_module(otlp_modname)
+        except ImportError as err:
+            raise ImportError(
+                f'Missing "opentelemetry-exporter-otlp-proto-grpc" package. '
+                f'Use [otlp] optional feature or remove "{Exporters.OTLP}" '
+                f'from "{Envs.OTEL_LOGGER_EXPORTER}"'
+            ) from err
+        batch_processor = BatchLogRecordProcessor(otlp_exporter.OTLPLogExporter(insecure=True))
+        logger_provider.add_log_record_processor(batch_processor)
 
     # Set up a logging handler for standard Python logging
+    set_logger_provider(logger_provider)
     return LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
 
 
-@lru_cache
-def console_log_handler(*, formatter: logging.Formatter) -> logging.Handler:
-    handler = logging.StreamHandler(sys.stderr)
+def _console_log_handler(console: str, *, formatter: logging.Formatter) -> logging.Handler:
+    match console:
+        case 'stdout':
+            handler = logging.StreamHandler(sys.stdout)
+        case 'stderr':
+            handler = logging.StreamHandler(sys.stderr)
+        case _:
+            raise ValueError(f'Invalid console log handler: {console}')
     handler.setFormatter(formatter)
     return handler
 
 
-@lru_cache
-def file_log_handler(filename: str, *, formatter: logging.Formatter) -> logging.Handler:
+def _file_log_handler(filename: str, *, formatter: logging.Formatter) -> logging.Handler:
     try:
         handler = logging.FileHandler(filename)
         handler.setFormatter(formatter)
     except OSError as err:
-        logging.critical(f"Could not open log file '{err.filename}': {err.strerror}")
+        raise RuntimeError(f"Could not open log file '{err.filename}': {err.strerror}") from err
     return handler
 
 
-# set up logging
-@lru_cache
-def initialize_logger(settings: Settings) -> logging.Logger:
-    # Set up logging
-    logger = logging.getLogger(settings.service_name)
-
+def initialize_logger(logger: logging.Logger, *, settings: Settings) -> logging.Logger:
     # remove all existing handlers, if any
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
@@ -78,26 +95,44 @@ def initialize_logger(settings: Settings) -> logging.Logger:
     logger.setLevel(settings.log_level)
 
     # Set up  console logging
-    if 'stderr' in settings.log_handlers:
-        handler = console_log_handler(formatter=settings.log_formatter)
+    if LogHandlerType.STDOUT in settings.log_handlers:
+        handler = _console_log_handler(settings.log_console, formatter=settings.log_formatter)
         logger.addHandler(handler)
 
     # Set up file logging
-    if 'file' in settings.log_handlers:
-        handler = file_log_handler(settings.log_file, formatter=settings.log_formatter)
+    if LogHandlerType.FILE in settings.log_handlers:
+        handler = _file_log_handler(settings.log_file, formatter=settings.log_formatter)
         logger.addHandler(handler)
 
     # Set up telemetry
-    if OPENTELEMETRY_AVAILABLE:
-        handler = telemetry_logger(settings.service_name, exporters=settings.log_handlers)
+    handler = _telemetry_logger(settings.service_name)
+    if not isinstance(handler, logging.NullHandler):
         logger.addHandler(handler)
 
+    # Set up the logger
     return logger
 
 
-def get_logger(name: str | Settings) -> logging.Logger:
-    if isinstance(name, str):
-        return logging.getLogger(name)
-    logger = logging.getLogger(name.service_name)
-    initialize_logger(name)
-    return logger
+class InitializeLoggerProtocol(Protocol):
+    def __call__(self, logger: logging.Logger, *, settings: Settings) -> logging.Logger: ...
+
+
+_logger_once = Once()
+
+
+def set_default_logger(
+    logger: logging.Logger,
+    *,
+    settings: Settings,
+    setup_func: InitializeLoggerProtocol | None = None,
+) -> logging.Logger:
+    global _logger_once
+
+    setup_func = setup_func or initialize_logger
+    if _logger_once.do_once(partial(setup_func, logger, settings=settings)) is False:
+        get_default_logger().info('Logger Already initialized')
+    return get_default_logger()
+
+
+def get_default_logger() -> logging.Logger:
+    return cast(logging.Logger, _logger_once.result)

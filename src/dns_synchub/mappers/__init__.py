@@ -1,9 +1,26 @@
 from abc import ABC
 from logging import Logger
-from typing import Generic, Protocol, TypedDict, TypeVar, runtime_checkable
+from typing import (
+    Generic,
+    Protocol,
+    TypedDict,
+    TypeVar,
+    runtime_checkable,
+)
 
 from dns_synchub.settings import Settings
-from dns_synchub.types import Domains, EventSubscriber
+from dns_synchub.telemetry import (
+    TelemetryAttributes as Attrs,
+    TelemetryConstants as Constants,
+    TelemetrySpans as Spans,
+)
+from dns_synchub.tracer import StatusCode, telemetry_tracer
+from dns_synchub.types import (
+    Domains,
+    EventSubscriber,
+    EventSubscriberType,
+    PollerSourceType,
+)
 
 T = TypeVar('T')  # Client backemd
 E = TypeVar('E')  # Event type accepted
@@ -33,6 +50,7 @@ class BaseMapper(ABC, MapperProtocol[E, R], Generic[E, R]):
 
     def __init__(self, logger: Logger):
         self.logger = logger
+        self.tracer = telemetry_tracer().get_tracer('otel.instrumentation.mappers')
 
 
 class Mapper(BaseMapper[E, Domains], Generic[E, T]):
@@ -60,4 +78,12 @@ class Mapper(BaseMapper[E, Domains], Generic[E, T]):
 
 from dns_synchub.mappers.cloudflare import CloudFlareMapper  # noqa: E402
 
-__all__ = ['CloudFlareMapper']
+__all__ = [
+    'CloudFlareMapper',
+    'Attrs',
+    'Constants',
+    'Spans',
+    'EventSubscriberType',
+    'PollerSourceType',
+    'StatusCode',
+]

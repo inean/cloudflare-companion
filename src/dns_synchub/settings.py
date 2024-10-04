@@ -1,13 +1,13 @@
 import logging
 import re
-from typing import Self
+from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dns_synchub.types import (
     Domains,
-    LogHandlersType,
+    LogHandlerType,
     LogLevelType,
     RecordType,
     TTLType,
@@ -25,23 +25,30 @@ class Settings(BaseSettings):
     )
 
     # Settings
+    service_name: str = Field(
+        default='dns-synchub',
+        validation_alias=AliasChoices(
+            'otel_service_name',
+            'service_name',
+        ),
+    )
     dry_run: bool = False
     verbose: bool = False
 
     # Log Settings
-    service_name: str = 'dns-synchub'
     log_level: LogLevelType = logging.INFO
-    log_handlers: set[LogHandlersType] = {'otlp', 'stderr'}
+    log_handlers: set[str] = {LogHandlerType.STDOUT}
     log_file: str = '/logs/dns-synchub.log'
+    log_console: Literal['stdout', 'stderr'] = 'stdout'
 
     @property
     def log_formatter(self) -> logging.Formatter:
         fmt = '%(asctime)s | %(message)s'
         if self.verbose:
-            fmt = '%(asctime)s %(levelname)s %(lineno)d | %(message)s'
+            fmt = '%(asctime)s %(levelname)-6s %(lineno)4d | %(message)s'
         elif logging.DEBUG == self.log_level:
-            fmt = '%(asctime)s %(levelname)s | %(message)s'
-        return logging.Formatter(fmt, '%Y-%m-%dT%H:%M:%S%z')
+            fmt = '%(asctime)s %(levelname)-6s | %(message)s'
+        return logging.Formatter(fmt, '%Y-%m-%dT%H:%M:%S')
 
     # Poller Common settings
 

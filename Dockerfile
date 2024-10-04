@@ -3,6 +3,10 @@ ARG PYTHON_VERSION=3.11
 ARG APP_PATH=/app
 ARG VIRTUAL_ENV_PATH=.venv
 
+# Registry and repository args
+ARG REGISTRY="ghcr.io"
+ARG REPOSITORY="inean/dns-synchub"
+
 # Builder stage
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
@@ -48,8 +52,8 @@ ARG APP_PATH
 ARG VIRTUAL_ENV_PATH
 
 # Image args
-ARG REGISTRY="ghcr.io"
-ARG REPOSITORY="inean/dns-synchub"
+ARG REGISTRY
+ARG REPOSITORY
 
 # Set labels for the image
 LABEL url="https://github.com/${REPOSITORY}/"

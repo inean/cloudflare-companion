@@ -10,21 +10,20 @@ authors = [
 readme = "README.md"
 version = "0.1.0"
 dependencies = [
-    "cloudflare <= 2.20",
+    "cloudflare < 2.20",
     "docker>=7.1.0",
+    "opentelemetry-distro==0.48b0",
     "pydantic >= 2.0",
     "pydantic-settings @ git+https://github.com/inean/pydantic-settings@2.3",
     "python-dotenv>=1.0.1",
     "requests>=2.26.0",
     "tenacity>=9.0.0",
-    "typing-extensions>= 4.5.0",
+    "typing-extensions>=4.5.0",
 ]
 requires-python = ">= 3.11"
 
 [project.optional-dependencies]
-telemetry = [
-    "opentelemetry-api",
-    "opentelemetry-sdk",
+otlp = [
     "opentelemetry-exporter-otlp-proto-grpc",
 ]
 
@@ -48,6 +47,7 @@ dev-dependencies = [
     "pytest-mock >=3.14.0",
     "pytest>=8.3.2",
     "pytest-pretty",
+    "pytest-env",
     # Type stubs
     "types-docker>=7.1.0.20240827",
 ]
@@ -65,6 +65,10 @@ pythonpath = [
 filterwarnings = [
     "error",
 ]
+[tool.pytest_env]
+    OTEL_TRACES_EXPORTER = 'none'
+    OTEL_METRICS_EXPORTER = 'none'
+    OTEL_LOGGER_EXPORTER = 'none'
 
 [tool.coverage.run]
 branch = true
@@ -129,10 +133,7 @@ extend-fixable = [
 ]
 
 [tool.ruff.lint.isort]
-force-sort-within-sections = true
-known-first-party = [
-    'src',
-]
+combine-as-imports = true
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -153,6 +154,9 @@ keep-runtime-typing = true
 [tool.deptry]
 root = 'src/dns_synchub'
 
+[tool.deptry.per_rule_ignores]
+DEP002 = ["opentelemetry-exporter-otlp-proto-grpc"]
+
 [tool.mypy]
 strict = true
 files = [
@@ -160,7 +164,7 @@ files = [
     "tests/",
 ]
 # Third party type stubs
-mypy_path = "types"
+mypy_path = "types:src"
 #Don't prevents discovery of packages that don’t have an __init__.py
 namespace_packages = true
 
