@@ -12,7 +12,7 @@ from opentelemetry.sdk.metrics.export import (
 )
 from opentelemetry.sdk.resources import Resource
 
-from dns_synchub.telemetry import (
+from dns_synchub.telemetry_constants import (
     TelementryExporters as Exporters,
     TelemetryEnv as Env,
     TelemetryEnvDefaults as Constants,

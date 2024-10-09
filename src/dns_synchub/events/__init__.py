@@ -4,19 +4,20 @@ from collections.abc import Iterator
 from logging import Logger
 from typing import Generic, TypeVar
 
-from dns_synchub.telemetry import (
+from dns_synchub.telemetry_constants import (
     TelemetryAttributes as Attrs,
     TelemetryConstants as Constants,
     TelemetrySpans as Spans,
 )
 from dns_synchub.tracer import Span, telemetry_tracer
-from dns_synchub.types import (
+from dns_synchub.utils._helpers import getd
+
+from .types import (
     Event,
     EventSubscriber,
     EventSubscriberDataType,
     EventSubscriberType,
 )
-from dns_synchub.utils._helpers import getd
 
 T_co = TypeVar('T_co')
 

@@ -1,16 +1,31 @@
 ---
-default_stages: [commit]
+default_stages: [pre-commit]
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.5
     hooks:
       - id: ruff
         name: Ruff linter
-        args: [--fix]
+        args: [--fix, --exit-non-zero-on-fix]
         types_or: [python, pyi]
       - id: ruff-format
         name: Ruff format
         types_or: [python, pyi]
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+    - id: codespell
+      additional_dependencies:
+        - tomli
+      args: [--ignore-words-list, astroid ]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+    -   id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        additional_dependencies: ["gibberish-detector"]
 
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.17
@@ -29,16 +44,15 @@ repos:
         types: ["dockerfile"]
         entry: hadolint
 
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0  # or master if you're bold
+    hooks:
+      - id: interrogate
+        args: [--quiet, --fail-under=1]
+        exclude: test.*
+
   - repo: local
     hooks:
-      - id: update-version
-        name: Update Version
-        entry: uv run scripts/versioning.py
-        language: python
-        pass_filenames: false
-        stages: [commit]
-        files: ^pyproject\.toml$
-
       - id: mypy
         name: mypy static type checker
         language: system

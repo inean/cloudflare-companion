@@ -3301,7 +3301,7 @@
         "description": "Detailed metrics must be configured in the collector configuration. They add grouping by transport protocol (http/grpc) for receivers. ",
         "hide": 0,
         "includeAll": false,
-        "label": "Additional groupping",
+        "label": "Additional grouping",
         "multi": false,
         "name": "grouping",
         "options": [

@@ -11,10 +11,10 @@ import docker.client
 import docker.errors
 import pytest
 
+from dns_synchub.events.types import Event, EventSubscriber
 from dns_synchub.pollers import PollerData
 from dns_synchub.pollers.docker import DockerError, DockerPoller
 from dns_synchub.settings import Settings
-from dns_synchub.types import Event, EventSubscriber
 
 
 class MockDockerEvents:
@@ -84,7 +84,7 @@ def mock_requests_get(
                     return_value = {'Name': 'Mock Docker'}
                 case '/v1.41/containers/json':
                     return_value = [{'Id': id_} for id_ in containers.keys()]
-                case details if (match := re.search(r'/v1.41/containers/([^/]+)/json', details)):
+                case details if match := re.search(r'/v1.41/containers/([^/]+)/json', details):
                     return_value = containers[match.group(1)]
                 case other:
                     raise AssertionError(f'Unexpected URL: {other}')

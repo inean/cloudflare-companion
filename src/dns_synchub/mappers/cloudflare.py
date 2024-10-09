@@ -20,15 +20,17 @@ from tenacity import (
 )
 from typing_extensions import override
 
+from dns_synchub.events.types import Event
 from dns_synchub.mappers import Mapper
 from dns_synchub.pollers import PollerData
+from dns_synchub.pollers.types import PollerSourceType
 from dns_synchub.settings import Settings
-from dns_synchub.telemetry import (
+from dns_synchub.settings.types import Domains
+from dns_synchub.telemetry_constants import (
     TelemetryAttributes as Attrs,
     TelemetrySpans as Spans,
 )
 from dns_synchub.tracer import SpanKind
-from dns_synchub.types import Domains, Event, PollerSourceType
 
 
 class CloudFlareException(Exception):
@@ -171,7 +173,7 @@ class CloudFlareMapper(Mapper[PollerData[PollerSourceType], CloudFlare]):
             tasks: list[Any] = []
             for host in data.hosts:
                 for domain_info in self.domains:
-                    # Don't update the domain if it's the same as the target domain, which sould be used on tunnel
+                    # Don't update the domain if it's the same as the target domain, which should be used on tunnel
                     if host == domain_info.target_domain:
                         self.logger.debug(f'Ignoring {host}: Match target domain')
                         continue

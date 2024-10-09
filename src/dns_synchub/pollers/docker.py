@@ -23,7 +23,8 @@ from typing_extensions import override
 
 from dns_synchub.pollers import Poller, PollerData
 from dns_synchub.settings import Settings
-from dns_synchub.types import PollerSourceType
+
+from .types import PollerSourceType
 
 
 class DockerError(Exception):
@@ -152,7 +153,7 @@ class DockerPoller(Poller[DockerClient]):
             wait=wait_exponential(multiplier=self.config['wait'], max=self.poll_sec),
             retry=retry_if_exception_type(requests.exceptions.ConnectionError),
             before_sleep=lambda state: self.logger.error(
-                f'Retry attept {state.attempt_number}: {state.outcome.exception() if state.outcome else None}'
+                f'Retry attempt {state.attempt_number}: {state.outcome.exception() if state.outcome else None}'
             ),
         )
         async def fetch_events(kwargs: dict[str, Any]) -> Any:

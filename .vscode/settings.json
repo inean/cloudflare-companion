@@ -3,11 +3,12 @@
     "files.insertFinalNewline": true,
     "files.trimTrailingWhitespace": true,
 
-    // Python setttings
+    // Python settings
+    "python.envFile": "",
+    "python.testing.pytestEnabled": true,
     "python.testing.pytestArgs": [
         "tests"
     ],
-    "python.testing.pytestEnabled": true,
     "python.analysis.typeCheckingMode": "basic",
     "python.analysis.autoImportCompletions": true,
     "python.analysis.extraPaths": [

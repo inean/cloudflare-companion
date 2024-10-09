@@ -10,13 +10,18 @@ authors = [
 readme = "README.md"
 version = "0.1.0"
 dependencies = [
+    #settings
+    "pydantic >= 2.0",
+    "pydantic-settings>=2.3.4",
+    "python-dotenv>=1.0.1",
+    # telemetry
+    "opentelemetry-distro==0.48b0",
+    "telemetry>=0.1.0",
+    # External dependencies
     "cloudflare < 2.20",
     "docker>=7.1.0",
-    "opentelemetry-distro==0.48b0",
-    "pydantic >= 2.0",
-    "pydantic-settings @ git+https://github.com/inean/pydantic-settings@2.3",
-    "python-dotenv>=1.0.1",
     "requests>=2.26.0",
+    # utilities
     "tenacity>=9.0.0",
     "typing-extensions>=4.5.0",
 ]
@@ -24,7 +29,7 @@ requires-python = ">= 3.11"
 
 [project.optional-dependencies]
 otlp = [
-    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-exporter-otlp-proto-grpc >= 0.49b0",
 ]
 
 [project.urls]
@@ -32,44 +37,81 @@ Homepage = "https://github.com/inean/dns-synchub"
 Source = "https://github.com/inean/dns-synchub"
 Changelog = "https://github.com/inean/dns-synchub/blob/main/CHANGELOG.md"
 
-
+##
+# Build system configuration (uv)
+##
 [tool.uv]
 dev-dependencies = [
-    # lint
-    "mypy>=1.11.2",
+    # tools
+    "bump-my-version>=0.27.0",
     "pre-commit>=3.7.1",
+    # lint
+    "deptry>=0.20.0",
+    "mypy>=1.11.2",
     "pyupgrade>=3.16.0",
     "ruff>=0.5.4",
-    "deptry>=0.20.0",
     # test
     "pytest-asyncio>=0.23.8",
     "pytest-cov>=5.0.0",
+    "pytest-env>=1.1.5",
     "pytest-mock >=3.14.0",
+    "pytest-pretty>=1.2.0",
     "pytest>=8.3.2",
-    "pytest-pretty",
-    "pytest-env",
     # Type stubs
-    "types-docker>=7.1.0.20240827",
+    "types-docker>=7.1.0",
 ]
 package = false
 
+[tool.uv.workspace]
+members = [
+    "packages/*",
+]
+
+[tool.uv.sources]
+telemetry = { workspace = true }
+pydantic-settings = { git = "https://github.com/inean/pydantic-settings.git", branch = "2.3" }
+
+##
+# Bumpversion configuration
+##
+[tool.bumpversion]
+current_version = "0.1.0"
+search = "{current_version}"
+replace = "{new_version}"
+
+[tool.bumpeversion.files]
+paths = [
+    "pyproject.toml",
+    "src/dns_synchub/__about__.py",
+]
+
+##
+# Test configuration
+##
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "skip_fixture(name): Skip the test if the specified mark is present",
 ]
-testpaths = "tests"
+cache_dir = ".cache/pytest"
+testpaths = [
+    "tests",
+]
 pythonpath = [
     "src",
 ]
 filterwarnings = [
     "error",
 ]
-[tool.pytest_env]
-    OTEL_TRACES_EXPORTER = 'none'
-    OTEL_METRICS_EXPORTER = 'none'
-    OTEL_LOGGER_EXPORTER = 'none'
 
+[tool.pytest_env]
+OTEL_TRACES_EXPORTER = 'none'
+OTEL_METRICS_EXPORTER = 'none'
+OTEL_LOGGER_EXPORTER = 'none'
+
+##
+# Coverage configuration
+##
 [tool.coverage.run]
 branch = true
 source = [
@@ -80,11 +122,11 @@ context = '${CONTEXT}'
 [tool.coverage.report]
 precision = 2
 exclude_lines = [
-    'pragma: no cover',
-    'raise NotImplementedError',
-    'raise NotImplemented',
-    'if TYPE_CHECKING:',
     '@overload',
+    'if TYPE_CHECKING:',
+    'pragma: no cover',
+    'raise NotImplemented',
+    'raise NotImplementedError',
 ]
 
 [tool.coverage.paths]
@@ -92,7 +134,35 @@ source = [
     'src/dns_synchub/',
 ]
 
+##
+# Linter Configuration (MyPy)
+##
+[tool.mypy]
+strict = true
+files = [
+    "src/",
+    "tests/",
+]
+# Cache directory for MyPy
+cache_dir = ".cache/mypy"
+# Third party type stubs
+mypy_path = "types:src"
+#Don't prevents discovery of packages that don’t have an __init__.py
+namespace_packages = true
+
+[[tool.mypy.overrides]]
+module = [
+    'dotenv.*',
+]
+#Silently ignore imports of missing modules
+ignore_missing_imports = true
+
+##
+# Formatter Configuration (Ruff)
+##
 [tool.ruff]
+# Cache directory for Ruff
+cache-dir = ".cache/ruff"
 # set max-line-length to 100
 line-length = 100
 # Enable preview features.
@@ -151,26 +221,13 @@ convention = 'google'
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true
 
+##
+# Dependency management configuration (Deptry)
+##
 [tool.deptry]
 root = 'src/dns_synchub'
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["opentelemetry-exporter-otlp-proto-grpc"]
-
-[tool.mypy]
-strict = true
-files = [
-    "src/",
-    "tests/",
+DEP002 = [
+    "opentelemetry-exporter-otlp-proto-grpc",
 ]
-# Third party type stubs
-mypy_path = "types:src"
-#Don't prevents discovery of packages that don’t have an __init__.py
-namespace_packages = true
-
-[[tool.mypy.overrides]]
-module = [
-    'dotenv.*',
-]
-#Silently ignore imports of missing modules
-ignore_missing_imports = true

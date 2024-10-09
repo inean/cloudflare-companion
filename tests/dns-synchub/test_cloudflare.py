@@ -7,10 +7,12 @@ import pytest
 from CloudFlare import CloudFlare
 from CloudFlare.exceptions import CloudFlareAPIError
 
+from dns_synchub.events.types import Event
 from dns_synchub.mappers.cloudflare import CloudFlareMapper
 from dns_synchub.pollers import PollerData
+from dns_synchub.pollers.types import PollerSourceType
 from dns_synchub.settings import Settings
-from dns_synchub.types import Domains, Event, PollerSourceType
+from dns_synchub.settings.types import Domains
 
 
 @pytest.fixture

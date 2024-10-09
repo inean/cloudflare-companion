@@ -17,7 +17,7 @@ from opentelemetry.trace import SpanKind, Tracer
 from opentelemetry.trace.span import Span
 from opentelemetry.trace.status import StatusCode
 
-from dns_synchub.telemetry import (
+from dns_synchub.telemetry_constants import (
     TelementryExporters as Exporters,
     TelemetryEnv as Env,
     TelemetryEnvDefaults as Constants,

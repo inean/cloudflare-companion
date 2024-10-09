@@ -69,5 +69,4 @@ async def main(log: Logger, *, settings: Settings) -> None:
                 await poller.events.subscribe(dns)
                 tg.create_task(poller.start())
     except asyncio.CancelledError:
-        for poller in pollers:
-            await poller.stop()
+        pass

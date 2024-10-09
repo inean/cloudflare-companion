@@ -9,7 +9,8 @@ from typing_extensions import override
 
 from dns_synchub.pollers import Poller, PollerData
 from dns_synchub.settings import Settings
-from dns_synchub.types import PollerSourceType
+
+from .types import PollerSourceType
 
 
 class TimeoutSession(Session):
@@ -66,7 +67,7 @@ class TraefikPoller(Poller[Session]):
     def _validate(self, raw_data: list[dict[str, Any]]) -> PollerData[PollerSourceType]:
         hosts: list[str] = []
         for route in raw_data:
-            # Check if route is whell formed
+            # Check if route is well formed
             if not self._is_valid_route(route):
                 continue
             # Extract the domains from the rule

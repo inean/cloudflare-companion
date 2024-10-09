@@ -6,12 +6,12 @@ from functools import partial
 from typing import Protocol, cast
 
 from dns_synchub.settings import Settings
-from dns_synchub.telemetry import (
+from dns_synchub.settings.types import LogHandlerType
+from dns_synchub.telemetry_constants import (
     TelementryExporters as Exporters,
     TelemetryEnv as Envs,
     TelemetryEnvDefaults as Constants,
 )
-from dns_synchub.types import LogHandlerType
 from dns_synchub.utils._once import Once
 
 

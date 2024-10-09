@@ -5,7 +5,7 @@ from typing import Literal, Self
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from dns_synchub.types import (
+from dns_synchub.settings.types import (
     Domains,
     LogHandlerType,
     LogLevelType,

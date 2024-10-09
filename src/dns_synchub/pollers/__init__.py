@@ -19,14 +19,16 @@ from weakref import ref as WeakRef
 from typing_extensions import override
 
 from dns_synchub.events import EventEmitter
+from dns_synchub.events.types import EventSubscriberType
 from dns_synchub.settings import Settings
-from dns_synchub.telemetry import (
+from dns_synchub.telemetry_constants import (
     TelemetryAttributes as Attrs,
     TelemetryConstants as Constants,
     TelemetrySpans as Spans,
 )
 from dns_synchub.tracer import StatusCode, telemetry_tracer
-from dns_synchub.types import EventSubscriberType, PollerSourceType
+
+from .types import PollerSourceType
 
 T = TypeVar('T')
 
@@ -109,12 +111,12 @@ class BasePoller(ABC, PollerProtocol[T], Generic[T]):
         ) as span:
             self.logger.info(f'Starting {name}: Watching for changes')
             # self.fetch is called for the firstime, whehever a a client subscribe to
-            # this poller, so there's no need to initialy fetch data
+            # this poller, so there's no need to initially fetch data
             self._wtask = asyncio.create_task(self._watch())
             if timeout is not None:
                 until = datetime.now() + timedelta(seconds=timeout)
                 span.set_attribute(Attrs.TIMEOUT_STOP_AT, f'{until}')
-                self.logger.debug(f'{name}: Stop programed at {until}')
+                self.logger.debug(f'{name}: Stop programmed at {until}')
             try:
                 await asyncio.wait_for(self._wtask, timeout)
             except asyncio.CancelledError:
@@ -122,7 +124,6 @@ class BasePoller(ABC, PollerProtocol[T], Generic[T]):
                 self.logger.info(f'{name}: Run was cancelled')
             except TimeoutError:
                 span.set_attribute(Attrs.TIMEOUT_REACHED, True)
-                span.set_status(StatusCode.ERROR)
                 self.logger.info(f"{name}: Run timeout '{timeout}s' reached")
             finally:
                 await self.stop()
@@ -193,4 +194,4 @@ from dns_synchub.pollers.traefik import TraefikPoller
 
 # ruff: enable
 
-__all__ = ['TraefikPoller', 'DockerPoller']
+__all__ = ['TraefikPoller', 'DockerPoller', 'StatusCode']

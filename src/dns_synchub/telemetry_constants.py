@@ -49,4 +49,4 @@ class TelemetryAttributes:
 
 
 class TelemetryConstants:
-    TIMEOUT_ENDLESS = 'endless'
+    TIMEOUT_ENDLESS: str = 'endless'

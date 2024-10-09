@@ -10,7 +10,7 @@ ARG REPOSITORY="inean/dns-synchub"
 # Builder stage
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
-# Re-declare the ARG to use it in this stage
+# Redeclare the ARG to use it in this stage
 ARG APP_PATH
 ARG VIRTUAL_ENV_PATH
 
@@ -39,7 +39,8 @@ ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv                         \
     --mount=type=bind,source=uv.lock,target=uv.lock,ro                \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml,ro  \
-    uv sync --frozen --no-install-project --no-dev
+    --mount=type=bind,source=packages,target=packages,ro              \
+    uv sync --frozen --python-preference=system --no-install-project --no-editable --no-dev --all-extras
 
 # Copy the application source code:
 COPY src .

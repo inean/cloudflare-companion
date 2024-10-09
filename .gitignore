@@ -6,6 +6,7 @@ dist/
 wheels/
 *.egg-info
 .*_cache
+.cache
 
 # venv
 .venv

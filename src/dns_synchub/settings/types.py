@@ -1,16 +1,8 @@
-import asyncio
 import logging
-from abc import abstractmethod
-from collections.abc import Coroutine
-from dataclasses import dataclass, field
 from typing import (
     Annotated,
-    Generic,
     Literal,
-    Protocol,
-    TypeVar,
     cast,
-    runtime_checkable,
 )
 
 from pydantic import BaseModel, BeforeValidator
@@ -43,10 +35,6 @@ class LogHandlerType:
 
 LogLevelType = Annotated[int, BeforeValidator(validate_log_level)]
 
-
-# Poller Types
-PollerSourceType = Literal['manual', 'docker', 'traefik']
-
 # Mapper Types
 RecordType = Literal['A', 'AAAA', 'CNAME']
 
@@ -74,26 +62,3 @@ class Domains(BaseModel):
 
     def match(self, host: str) -> bool:
         return any(f'{sub_dom}.{self.name}' in host for sub_dom in self.excluded_sub_domains)
-
-
-# Event Types
-T = TypeVar('T')
-
-
-@dataclass
-class Event(Generic[T]):
-    klass: type[T] = field(init=False)
-    data: T
-
-    def __post_init__(self) -> None:
-        self.klass = type(self.data)
-
-
-@runtime_checkable
-class EventSubscriber(Protocol[T]):
-    @abstractmethod
-    async def __call__(self, event: Event[T]) -> None: ...
-
-
-EventSubscriberType = Coroutine[None, None, None] | EventSubscriber[T]
-EventSubscriberDataType = tuple[asyncio.Queue[Event[T]], float, float]

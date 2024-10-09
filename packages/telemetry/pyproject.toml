@@ -1,0 +1,22 @@
+[project]
+name = "telemetry"
+version = "0.1.0"
+description = "Helper library to work with telemetry data"
+authors = [
+    { name = "Carlos Martín", email = "inean.es@gmail.com" },
+]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "typing-extensions>=4.12.2",
+]
+
+
+[build-system]
+requires = [
+    "hatchling",
+]
+build-backend = "hatchling.build"

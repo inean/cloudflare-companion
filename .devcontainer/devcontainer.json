@@ -20,8 +20,8 @@
                 // Python exrtensions
                 "charliermarsh.ruff",
                 "kevinrose.vsc-python-indent",
+                "matangover.mypy",
                 "ms-azuretools.vscode-docker",
-                "ms-python.mypy-type-checker",
                 "ms-python.python",
                 "ms-python.vscode-pylance",
                 "ms-vscode-remote.remote-containers",
@@ -33,32 +33,13 @@
                 "yzhang.markdown-all-in-one"
             ],
             "settings": {
-                // Editor settings
-                "files.insertFinalNewline": true,
-                "files.trimTrailingWhitespace": true,
-
-                // Python setttings
-                "python.testing.pytestArgs": [
-                    "tests"
-                ],
-                "python.testing.pytestEnabled": true,
-                "python.analysis.typeCheckingMode": "basic",
-                "python.analysis.autoImportCompletions": true,
+                // Python Container settings
+                "python.venvPath": "${containerWorkspaceFolder}/.venv",
+                "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
                 "python.analysis.extraPaths": [
                     "${containerWorkspaceFolder}/types"
                 ],
-                "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
-                "python.venvPath": "${containerWorkspaceFolder}/.venv",
-                "python.envFile": "",
                 //Extensions
-                "[python]": {
-                    "editor.codeActionsOnSave": {
-                        "source.fixAll.ruff": "explicit",
-                        "source.organizeImports.ruff": "explicit"
-                    },
-                    "editor.defaultFormatter": "charliermarsh.ruff",
-                    "editor.formatOnSave": true
-                },
                 "terminal.integrated.defaultProfile.linux": "zsh",
                 "terminal.integrated.profiles.linux": {
                     "zsh": {
@@ -78,6 +59,11 @@
             "label": "Traefik Proxy",
             "onAutoForward": "notify"
         }
+    },
+
+    // Set environment variables
+    "containerEnv": {
+        "PYTHONPYCACHEPREFIX": "/workspace/.cache/pycache"
     },
 
     // Update container

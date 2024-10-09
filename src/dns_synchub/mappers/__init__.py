@@ -8,19 +8,23 @@ from typing import (
     runtime_checkable,
 )
 
+from dns_synchub.events.types import (
+    EventSubscriber,
+    EventSubscriberType,
+)
+from dns_synchub.pollers.types import (
+    PollerSourceType,
+)
 from dns_synchub.settings import Settings
-from dns_synchub.telemetry import (
+from dns_synchub.settings.types import (
+    Domains,
+)
+from dns_synchub.telemetry_constants import (
     TelemetryAttributes as Attrs,
     TelemetryConstants as Constants,
     TelemetrySpans as Spans,
 )
 from dns_synchub.tracer import StatusCode, telemetry_tracer
-from dns_synchub.types import (
-    Domains,
-    EventSubscriber,
-    EventSubscriberType,
-    PollerSourceType,
-)
 
 T = TypeVar('T')  # Client backemd
 E = TypeVar('E')  # Event type accepted
